@@ -2,13 +2,13 @@
 
 ```mermaid
 classDiagram
-    class LoadDrop01 {
+    class LoadAndDrop_01 {
         +dataFrame log_drains
         +Load()
         +Clean()
     }
 
-    class FeatMeta02 {
+    class FeatureEng_02 {
         +parquet
         +Load_Parquet()
         +process_features_log_drains()
