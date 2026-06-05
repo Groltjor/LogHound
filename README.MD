@@ -1,13 +1,38 @@
 # Arquitectura del sistema
 
 ```mermaid
-flowchart LR
-    A["Vercel<br/>Drain Logs"] --> B["Supabase DB<br/>vercel_logs_buffer"]
-    B --> C["Batch local<br/>consume logs recientes"]
-    C --> D["Preparacion de datos<br/>limpieza y features"]
-    D --> E["Modelo KMeans<br/>prediccion de actividad"]
-    E --> F["Datos predichos<br/>labels por ventana"]
-    F --> G["Archivo local<br/>production_pipeline/results"]
+flowchart TB
+    subgraph cloud["Cloud"]
+        vercel["Vercel App<br/>Drain Logs"]
+        supabase[("Supabase DB<br/>vercel_logs_buffer")]
+    end
+
+    subgraph local["Entorno local"]
+        batch(["Python batch<br/>production_pipeline/main.py"])
+        etl["Preparacion de datos<br/>limpieza + features"]
+        model[["Modelo KMeans<br/>models/kmeans/models"]]
+        predict["Prediccion<br/>labels por ventana"]
+        results[/"CSV local<br/>production_pipeline/results"/]
+    end
+
+    vercel -->|"envia logs"| supabase
+    supabase -->|"consulta registros recientes"| batch
+    batch --> etl
+    etl --> model
+    model --> predict
+    predict --> results
+
+    classDef source fill:#eef6ff,stroke:#2563eb,stroke-width:1.5px,color:#0f172a;
+    classDef database fill:#ecfdf5,stroke:#059669,stroke-width:1.5px,color:#064e3b;
+    classDef local fill:#fff7ed,stroke:#ea580c,stroke-width:1.5px,color:#431407;
+    classDef model fill:#f5f3ff,stroke:#7c3aed,stroke-width:1.5px,color:#2e1065;
+    classDef output fill:#f8fafc,stroke:#475569,stroke-width:1.5px,color:#0f172a;
+
+    class vercel source;
+    class supabase database;
+    class batch,etl,predict local;
+    class model model;
+    class results output;
 ```
 
 ## Descripcion
