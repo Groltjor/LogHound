@@ -47,39 +47,51 @@ La columna compacted permite distinguir entre registros crudos pendientes de pro
 
 vercel_logs_buffer representa la primera capa del sistema de datos:
 
-txt Vercel Log Drain ↓ Supabase Edge Function ↓ vercel_logs_buffer ↓ compactación / limpieza ↓ feature engineering ↓ modelo de clustering / análisis de agentes
+Vercel Log Drain
+↓
+Supabase Edge Function
+↓
+vercel_logs_buffer
+↓
+compactación / limpieza
+↓
+feature engineering
+↓
+modelo de clustering / análisis de agentes
 
 Esta separación permite mantener el sistema auditable, reproducible y tolerante a cambios futuros en la lógica de procesamiento.
 
+```mermaid
 flowchart TD
-A[Vercel Log Drain] --> B[Supabase Edge Function]
+    A["Vercel Log Drain"] --> B["Supabase Edge Function"]
 
-    B --> C{POST request?}
-    C -- No --> C1[405 Method Not Allowed]
-    C -- Yes --> D[Read raw body]
+    B --> C{"POST request?"}
+    C -- "No" --> C1["405 Method Not Allowed"]
+    C -- "Yes" --> D["Read raw body"]
 
-    D --> E[Validate x-vercel-signature]
-    E --> F{Signature valid?}
-    F -- No --> F1[403 invalid_signature]
-    F -- Yes --> G[Parse JSON payload]
+    D --> E["Validate x-vercel-signature"]
+    E --> F{"Signature valid?"}
+    F -- "No" --> F1["403 invalid_signature"]
+    F -- "Yes" --> G["Parse JSON payload"]
 
-    G --> H{Payload is array?}
-    H -- Yes --> I[Use logs array]
-    H -- No --> J[Wrap single log into array]
+    G --> H{"Payload is array?"}
+    H -- "Yes" --> I["Use logs array"]
+    H -- "No" --> J["Wrap single log into array"]
 
-    I --> K[Build rows]
-    J --> K[Build rows]
+    I --> K["Build rows"]
+    J --> K["Build rows"]
 
-    K --> L[Add metadata]
-    L --> L1[received_at]
-    L --> L2[source = vercel_log_drain]
-    L --> L3[year / month / day / hour UTC]
-    L --> L4[compacted = false]
-    L --> L5[raw log JSON]
+    K --> L["Add metadata"]
+    L --> L1["received_at"]
+    L --> L2["source = vercel_log_drain"]
+    L --> L3["year / month / day / hour UTC"]
+    L --> L4["compacted = false"]
+    L --> L5["raw log JSON"]
 
-    L --> M[(vercel_logs_buffer)]
+    L --> M[("vercel_logs_buffer")]
 
-    M --> N[Compaction process]
-    N --> O[Cleaned parquet / feature table]
-    O --> P[Feature engineering]
-    P --> Q[KMeans clustering / agent analysis]
+    M --> N["Compaction process"]
+    N --> O["Cleaned parquet / feature table"]
+    O --> P["Feature engineering"]
+    P --> Q["KMeans clustering / agent analysis"]
+```
