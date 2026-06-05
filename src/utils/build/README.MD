@@ -3,13 +3,13 @@
 ```mermaid
 classDiagram
     class LoadAndDrop_01 {
-        +dataFrame log_drains
+        +DataFrame log_drains
         +Load()
         +Clean()
     }
 
     class FeatureEng_02 {
-        +parquet
+        +Parquet raw_features
         +Load_Parquet()
         +process_features_log_drains()
         +check_for_negatives()
@@ -17,13 +17,45 @@ classDiagram
     }
 
     class PipeAndTrain_03 {
-        +parquet_labels
-        +joblib
-        +build_preprocess_base()
-        +mlflow.sklearn.autolog()
+        +Parquet parquet_labels
+        +Joblib model_artifact
+        +build_kmeans_from_preprocessor()
+        +fit_predict()
         +joblib.dump()
     }
 
+    class PreprocessBuilder {
+        +numeric_features
+        +categorical_features
+        +build_preprocess_base()
+        +ColumnTransformer
+        +Pipeline_numeric
+        +Pipeline_categorical
+    }
+
+    class NumericPipeline {
+        +SimpleImputer(strategy='median')
+        +PowerTransformer()
+        +StandardScaler()
+    }
+
+    class CategoricalPipeline {
+        +SimpleImputer(strategy='most_frequent')
+        +OneHotEncoder(handle_unknown='ignore')
+    }
+
+    class KMeansModel {
+        +KMeans(n_clusters=4)
+        +random_state=42
+        +fit_predict()
+        +predict()
+    }
+
     LoadAndDrop_01 --> FeatureEng_02 : output parquet and metadata
-    FeatureEng_02 --> PipeAndTrain_03 : output parquet_labels and model.joblib
+    FeatureEng_02 --> PipeAndTrain_03 : output features parquet
+    PipeAndTrain_03 --> PreprocessBuilder : builds preprocessor
+    PreprocessBuilder --> NumericPipeline : numeric columns
+    PreprocessBuilder --> CategoricalPipeline : categorical columns
+    PipeAndTrain_03 --> KMeansModel : trains clustering model
+    PreprocessBuilder --> KMeansModel : transformed matrix
 ```
