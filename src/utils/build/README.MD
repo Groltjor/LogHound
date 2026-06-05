@@ -16,5 +16,14 @@ classDiagram
         +save_checkpoint()
     }
 
-    LoadAndDrop_01 --> FeatureEng_02 : output parquet
+    class PipeAndTrain_03 {
+        +parquet_labels
+        +joblib
+        +build_preprocess_base()
+        +mlflow.sklearn.autolog()
+        +joblib.dump()
+    }
+
+    LoadAndDrop_01 --> FeatureEng_02 : output parquet and metadata
+    FeatureEng_02 --> PipeAndTrain_03 : output parquet_labels and model.joblib
 ```
