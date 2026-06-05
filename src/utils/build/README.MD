@@ -1,3 +1,9 @@
+## Construir Clasificador de Agent/Crawlers desde Vercel Log Drains
+
+La siguiente arquitectura considera que se tiene ya preparado un log drains en un formato tabular. En este caso se descarga desde Supabase bajo un esquema tabular descrito en el TABLE_README.MD
+
+## Arquitectura de Entrenamiento
+
 ```mermaid
 classDiagram
     class build_preprocess_base {
