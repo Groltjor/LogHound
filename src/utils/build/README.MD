@@ -1,61 +1,76 @@
-# Notas de Build
-
 ```mermaid
 classDiagram
-    class LoadAndDrop_01 {
-        +DataFrame log_drains
-        +Load()
-        +Clean()
+    class build_preprocess_base {
+        +metadata dict
+        +cols_to_np1log
+        +cols_to_yeo
+        +cols_to_onehot
+        +cols_to_standard
+        +cols_to_function
+        +return ColumnTransformer
     }
 
-    class FeatureEng_02 {
-        +Parquet raw_features
-        +Load_Parquet()
-        +process_features_log_drains()
-        +check_for_negatives()
-        +save_checkpoint()
+    class ColumnTransformer {
+        +log1p: Pipeline
+        +maper: Pipeline
+        +yeo: Pipeline
+        +cat: Pipeline
+        +num: Pipeline
+        +remainder='drop'
     }
 
-    class PipeAndTrain_03 {
-        +Parquet parquet_labels
-        +Joblib model_artifact
-        +build_kmeans_from_preprocessor()
-        +fit_predict()
-        +joblib.dump()
-    }
-
-    class PreprocessBuilder {
-        +numeric_features
-        +categorical_features
-        +build_preprocess_base()
-        +ColumnTransformer
-        +Pipeline_numeric
-        +Pipeline_categorical
-    }
-
-    class NumericPipeline {
-        +SimpleImputer(strategy='median')
-        +PowerTransformer()
+    class log1p_transformer {
+        +SimpleImputer(median)
+        +FunctionTransformer(np.log1p)
         +StandardScaler()
     }
 
-    class CategoricalPipeline {
-        +SimpleImputer(strategy='most_frequent')
-        +OneHotEncoder(handle_unknown='ignore')
+    class function_map {
+        +SimpleImputer(median)
+        +FunctionTransformer(astype int)
     }
 
-    class KMeansModel {
-        +KMeans(n_clusters=4)
-        +random_state=42
-        +fit_predict()
-        +predict()
+    class yeo_transformer {
+        +SimpleImputer(median)
+        +PowerTransformer(yeo-johnson)
+        +StandardScaler()
     }
 
-    LoadAndDrop_01 --> FeatureEng_02 : output parquet and metadata
-    FeatureEng_02 --> PipeAndTrain_03 : output features parquet
-    PipeAndTrain_03 --> PreprocessBuilder : builds preprocessor
-    PreprocessBuilder --> NumericPipeline : numeric columns
-    PreprocessBuilder --> CategoricalPipeline : categorical columns
-    PipeAndTrain_03 --> KMeansModel : trains clustering model
-    PreprocessBuilder --> KMeansModel : transformed matrix
+    class onehot_transformer {
+        +SimpleImputer(most_frequent)
+        +OneHotEncoder(ignore_unknown)
+    }
+
+    class numeric_pipeline {
+        +SimpleImputer(median)
+        +StandardScaler()
+    }
+
+    class build_kmeans_from_preprocessor {
+        +preprocessor ColumnTransformer
+        +n int
+        +rd_state int
+        +return Pipeline
+    }
+
+    class KMeans {
+        +n_clusters=n
+        +random_state=rd_state
+    }
+
+    class TrainingPipeline {
+        +preprocessor
+        +model
+    }
+
+    build_preprocess_base --> ColumnTransformer : builds
+    ColumnTransformer *-- log1p_transformer : cols_to_np1log
+    ColumnTransformer *-- function_map : cols_to_function
+    ColumnTransformer *-- yeo_transformer : cols_to_yeo
+    ColumnTransformer *-- onehot_transformer : cols_to_onehot
+    ColumnTransformer *-- numeric_pipeline : cols_to_standard
+
+    build_kmeans_from_preprocessor --> TrainingPipeline : builds
+    TrainingPipeline *-- ColumnTransformer : preprocessor
+    TrainingPipeline *-- KMeans : model
 ```
