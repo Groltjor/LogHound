@@ -2,25 +2,25 @@
 
 ```mermaid
 flowchart LR
-    A[Vercel Logs / Log Drains] --> B[Supabase<br/>tabla: vercel_logs_buffer]
-    B --> C[production_pipeline.utils.etl<br/>extract_n_load()]
-    C --> D[Consulta ultimos 10 minutos<br/>load_data_from_table_last_10()]
-    D --> E[Normalizacion JSON<br/>pd.json_normalize(log)]
-    E --> F[Limpieza de logs<br/>preprocess_drain_logs()]
-    F --> G[Feature engineering<br/>process_features_log_drains()]
-    G --> H[Dataset de prediccion X<br/>+ indices de identidad]
+    A["Vercel Logs / Log Drains"] --> B["Supabase<br/>tabla: vercel_logs_buffer"]
+    B --> C["production_pipeline.utils.etl<br/>extract_n_load"]
+    C --> D["Consulta ultimos 10 minutos<br/>load_data_from_table_last_10"]
+    D --> E["Normalizacion JSON<br/>pd.json_normalize log"]
+    E --> F["Limpieza de logs<br/>preprocess_drain_logs"]
+    F --> G["Feature engineering<br/>process_features_log_drains"]
+    G --> H["Dataset de prediccion X<br/>+ indices de identidad"]
 
-    I[Modelo entrenado KMeans<br/>models/kmeans/models/*.joblib] --> J[production_pipeline/main.py]
+    I["Modelo entrenado KMeans<br/>models/kmeans/models/*.joblib"] --> J["production_pipeline/main.py"]
     H --> J
-    J --> K[Seleccion de feature_cols<br/>artifact['feature_cols']]
-    K --> L[Prediccion<br/>model.predict(X)]
-    L --> M[Resultado final<br/>indices + label + features]
-    M --> N[CSV guardado<br/>production_pipeline/results/predicted_window_*.csv]
+    J --> K["Seleccion de feature_cols<br/>artifact feature_cols"]
+    K --> L["Prediccion<br/>model.predict"]
+    L --> M["Resultado final<br/>indices + label + features"]
+    M --> N["CSV guardado<br/>production_pipeline/results/predicted_window_*.csv"]
 
     subgraph Identidad
-        ID1[ja4Digest]
-        ID2[proxy.userAgent]
-        ID3[proxy.clientIp]
+        ID1["ja4Digest"]
+        ID2["proxy.userAgent"]
+        ID3["proxy.clientIp"]
     end
 
     G --> ID1
