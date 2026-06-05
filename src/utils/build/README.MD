@@ -16,5 +16,5 @@ classDiagram
         +save_checkpoint()
     }
 
-    LoadDrop01 --> FeatMeta02 : output parquet
+    LoadAndDrop_01 --> FeatureEng_02 : output parquet
 ```
