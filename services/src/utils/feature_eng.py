@@ -24,7 +24,7 @@ def process_features_log_drains(fuente_datos : pd.DataFrame) -> pd.DataFrame:
 
             mean_time_between_requests_ms = (
                 'proxy.timestamp',
-                lambda x: x.sort_values().diff().median()
+                lambda x: x.sort_values().diff().mean()
             ),
 
             median_time_between_requests_ms = (

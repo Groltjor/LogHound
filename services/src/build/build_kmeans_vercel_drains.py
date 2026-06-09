@@ -158,7 +158,7 @@ to_append = ['ja4Digest','proxy.userAgent', 'proxy.clientIp']
 X_drains_labels[to_append] = frame_drain[to_append]
 X_drains_labels['labels'] = labels
 
-X_drains_labels.to_csv(os.path.join(RESULTS_FOLDER, 'labeled_frame.csv'))
+X_drains_labels.to_csv(os.path.join(RESULTS_FOLDER, 'labeled_frame.csv'), index = False)
 
 run_timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 

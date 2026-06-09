@@ -139,16 +139,18 @@ flowchart TB
 
 ## Lectura actual del modelo
 
-La siguiente tabla resume cómo el modelo KMeans está separando los user agents en el artefacto actual. Es una lectura operacional de los centroides: las etiquetas no son clases supervisadas, sino grupos de comportamiento que deben revisarse cuando se reentrene el modelo. (Necesita implementación)
+La siguiente tabla resume cómo el modelo KMeans está separando los user agents en el artefacto actual. Es una lectura operacional hecha desde `Notebooks/06_check.ipynb` sobre los promedios por label: las etiquetas no son clases supervisadas, sino grupos de comportamiento que deben revisarse cuando se reentrene el modelo.
 
-| Label | Patrón observado                     | Requests | Ventana de actividad ms | Mediana entre requests ms | One shot | Lectura práctica                                                                      |
-| ----- | ------------------------------------ | -------: | ----------------------: | ------------------------: | -------: | ------------------------------------------------------------------------------------- |
-| 0     | Request único                        |        1 |                       0 |                         0 |        1 | Visita aislada o agente sin repetición en la ventana.                                 |
-| 1     | Bajo volumen con separación moderada |        3 |                44,768.5 |                     6,279 |        0 | Actividad ligera, probablemente navegación o crawler poco agresivo.                   |
-| 2     | Alto volumen                         |       49 |              44,582,656 |                     2,037 |        0 | Candidato fuerte a crawler agresivo o agente automatizado con muchas rutas visitadas. |
-| 3     | Burst corto                          |        6 |                 2,566.5 |                         0 |        0 | Varias requests concentradas en muy poco tiempo.                                      |
+| Label | Patrón observado                  | Requests | Ventana de actividad ms | Mean entre requests ms | Median entre requests ms | One shot | Lectura práctica                                                                      |
+| ----- | --------------------------------- | -------: | ----------------------: | ---------------------: | -----------------------: | -------: | ------------------------------------------------------------------------------------- |
+| 0     | Visitas casi aisladas             |     1.54 |                    0.96 |                   0.92 |                     0.92 |     0.59 | Tráfico de baja repetición; mezcla de requests únicos y grupos mínimos.               |
+| 1     | Alto volumen sostenido            |    94.11 |           66,997,165.95 |             625,832.44 |               625,832.44 |     0.00 | Candidato fuerte a crawler agresivo o agente automatizado con muchas rutas visitadas. |
+| 2     | Burst rápido de varias requests   |     6.89 |            6,960,330.78 |                  94.05 |                    94.05 |     0.00 | Varias requests con separación muy corta; útil para detectar actividad concentrada.   |
+| 3     | Bajo volumen con pausa larga      |     3.27 |           11,472,758.51 |           3,429,376.49 |             3,429,376.49 |     0.00 | Pocas requests repartidas en una ventana amplia; comportamiento menos agresivo.       |
 
-En el estado actual `conteo_requests`, `times_timestamp`, `request_amount` y `routes_visited` tienden a moverse juntos, por eso la lectura principal sale de volumen, ventana de actividad y tiempo entre requests. `Unnamed: 0` aparece en el resumen del artefacto, pero debe tratarse como columna técnica/índice mientras se limpia esa deuda del feature engineering.
+Para la interpretabilidad se usa el promedio por label de forma intencional: en este caso conviene que los outliers afecten la lectura porque vuelven más obvios los grupos extremos, especialmente los agentes de alto volumen y las ventanas temporales largas. La mediana sigue siendo útil como lectura robusta, pero puede ocultar parte de esa separación operacional.
+
+En el estado actual `conteo_requests`, `times_timestamp`, `request_amount` y `routes_visited` tienden a moverse juntos, por eso la lectura principal sale de volumen, ventana de actividad y tiempo entre requests. El `Unnamed: 0` del resumen anterior venía del índice guardado en CSV y fue eliminado al exportar `labeled_frame.csv` sin índice.
 
 ## Próximos pasos
 
