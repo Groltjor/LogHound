@@ -8,7 +8,7 @@ from datetime import datetime
 SRC_ROOT = Path.cwd().parent
 SERVICES_ROOT = SRC_ROOT / 'services'
 PRODUCTION_UTILS = SRC_ROOT
-MODEL_PATH = SERVICES_ROOT / 'models' / 'kmeans' / 'models' / 'kmeans_vercel_drains_2026-06-09_16-51-29.joblib'
+MODEL_PATH = SERVICES_ROOT / 'models' / 'kmeans' / 'models' / 'kmeans_vercel_drains_2026-06-09_17-14-13.joblib'
 
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
