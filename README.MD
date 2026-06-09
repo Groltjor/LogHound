@@ -100,6 +100,6 @@ La siguiente tabla resume cómo el modelo KMeans está separando los user agents
 
 En el estado actual `conteo_requests`, `times_timestamp`, `request_amount` y `routes_visited` tienden a moverse juntos, por eso la lectura principal sale de volumen, ventana de actividad y tiempo entre requests. `Unnamed: 0` aparece en el resumen del artefacto, pero debe tratarse como columna técnica/índice mientras se limpia esa deuda del feature engineering.
 
-### Nota
+## Próximos pasos
 
-El código fuente del proyecto se encuentra aún bajo revisión.
+En este momento el proyecto se mantendra en standby, sin embargo implementar reglas sobre los user agents clasificados sería una gran adición para refinar las reglas de firewalls e impactar la toma de desiciones sobre el firewall, en este momento la clasificación es úitl, pero nutrir con una capa de reglas o volver a clusterizar este grupo nos puede brindar reglas semiautomatizadas que ayudarian fuertemente a agilizar la detección de tráfico de userAgents no deseados y de baja constribución a proyectos.
