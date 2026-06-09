@@ -12,20 +12,70 @@ Este repo busca presentar una arquitectura sencilla, pero efectiva haciendo deli
 
 ## Cómo usar:
 
-production/pipeline/main.py
+### Entrenamiento
 
-Este archivo conecta a la base de datos en postgress hacia la tabla que almacena los logdrains desde Vercel y entrena un modelo de KMEANS con esa data idealmente de 24 horas.
-El entrenamiento actual prioriza, tiempo medio de requests, número de requests y combinación j4digest por lo que no funcionará optimo si se enmascara con Cloudflare.
-Este modelo deberá almacenarse en /services/src/models.
+El pipeline que construye el entrenamiento completo vive en:
+
+```bash
+services/src/build/build_kmeans_vercel_drains.py
+```
+
+Debe ejecutarse desde la carpeta `services`, porque el script usa `Path.cwd()` para resolver `src` y `models`:
+
+```bash
+cd services
+python3.11 src/build/build_kmeans_vercel_drains.py
+```
+
+Este flujo:
+
+1. Pregunta si debe descargar fresh data desde Supabase.
+2. Si se responde que si, extrae logs desde la tabla indicada, normaliza el campo `log`, limpia el payload y guarda un parquet de entrenamiento.
+3. Si se responde que no, reutiliza un parquet existente en `services/models/kmeans/data`.
+4. Construye features agrupadas por `ja4Digest`, `proxy.userAgent` y `proxy.clientIp`.
+5. Crea metadata de preprocesamiento.
+6. Entrena un pipeline `ColumnTransformer + KMeans`.
+7. Guarda checkpoints, labels exploratorias y el artefacto `.joblib`.
+
+Las salidas quedan en:
+
+```txt
+services/models/kmeans/data/
+services/models/kmeans/checkpoints/
+services/models/kmeans/results/
+services/models/kmeans/models/
+```
+
+Preferentemente debe entrenarse con una ventana historica amplia, por ejemplo data de 24 horas, para que los clusters tengan suficiente variacion de comportamiento.
 
 ### Nota
 
 Necesita aún crear visualización para revisión de etiquetas y descripciones de como Kmeans ha organizado las labels
 También hay una deuda actual técnica sobre variables del Feature Engineering, es menor, pero incrementa el size de los archivos.
 
-services/main.py
+### Servicio FastAPI
 
 Este levanta un endpoint de FastAPI (aún sin integraciones de seguridad) para clasificar en periodos de 10 minutos user agents desde la misma base de datos de logdrains en supabase, en este momento esta disponible un modelo entrenado con datos de 100k registros de logs aunque este tenderá a causar covariance shift dado que los crawlers cambian cada n periodo de tiempo, de ahi la razón de un pipeline de reentrenamiento.
+
+El flujo de inferencia vive en:
+
+```txt
+services/main.py
+services/src/run_pipeline.py
+services/src/utils/etl.py
+```
+
+next_interface
+
+Es el código necesario para visualizar la interface, aún en trabajo para exportar, pero en teoría funciona.
+
+### Estado de `production_pipeline`
+
+`production_pipeline/` ya no es el pipeline principal de entrenamiento. El entrenamiento real fue movido/consolidado en `services/src/build/build_kmeans_vercel_drains.py`.
+
+En el estado actual, `production_pipeline/main.py` funciona como scorer batch legacy: carga un modelo ya entrenado, predice una ventana reciente y genera CSVs en `production_pipeline/results`. Puede seguir sirviendo para validaciones offline o auditoria rapida, pero duplica parte del flujo que ya existe en `services/src` y no debe tratarse como la fuente principal del sistema.
+
+Si se mantiene, conviene dejarlo claramente como herramienta auxiliar. Si no se va a usar para validacion batch, puede considerarse obsoleto.
 
 ## Importante
 
@@ -44,14 +94,14 @@ flowchart TB
     end
 
     subgraph training["Training pipeline"]
-        trainBatch(["production_pipeline/main.py"])
+        trainBatch(["services/src/build/build_kmeans_vercel_drains.py"])
         trainEtl["Extracción + feature engineering<br/>logs históricos"]
         trainModel["Entrenamiento KMeans<br/>pipeline + feature_cols"]
-        trainArtifacts[/"Artefactos y resultados<br/>production_pipeline/results"/]
+        trainArtifacts[/"Artefactos y resultados<br/>services/models/kmeans"/]
     end
 
     subgraph release["Promoción del modelo"]
-        promotedModel[["Modelo publicado<br/>services/src/models/*.joblib"]]
+        promotedModel[["Modelo entrenado<br/>services/models/kmeans/models/*.joblib"]]
     end
 
     subgraph api["Servicio de inferencia"]
@@ -65,7 +115,7 @@ flowchart TB
     trainBatch --> trainEtl
     trainEtl --> trainModel
     trainModel --> trainArtifacts
-    trainArtifacts -.->|"copiar/promover .joblib"| promotedModel
+    trainArtifacts --> promotedModel
 
     fastapi -->|"GET /"| servicePipeline
     supabase -->|"lectura ultimos 10 min"| servicePipeline

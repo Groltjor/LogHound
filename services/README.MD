@@ -14,7 +14,7 @@ Actualmente el endpoint principal ejecuta `run_pipeline()` y realiza el siguient
 2. Normaliza el payload de logs.
 3. Limpia columnas no usadas.
 4. Construye features por combinacion de `ja4Digest`, `proxy.userAgent` y `proxy.clientIp`.
-5. Carga el modelo entrenado desde `services/src/models`.
+5. Carga el modelo entrenado desde `services/models/kmeans/models`.
 6. Ejecuta prediccion.
 7. Devuelve una respuesta JSON con las labels generadas.
 
@@ -29,7 +29,7 @@ flowchart TB
     etl["ETL<br/>utils/etl.py"]
     gather["Consulta ventana reciente<br/>utils/gather.py"]
     features["Feature engineering<br/>utils/feature_eng.py"]
-    model[["Modelo KMeans<br/>services/src/models/*.joblib"]]
+    model[["Modelo KMeans<br/>services/models/kmeans/models/*.joblib"]]
     response[/"JSON response<br/>labels + features"/]
 
     client -->|"GET /"| api
@@ -62,7 +62,7 @@ El servicio no entrena modelos.
 El modelo debe existir previamente en:
 
 ```txt
-services/src/models/
+services/models/kmeans/models/
 ```
 
 El artefacto esperado es un `.joblib` que contiene al menos:
@@ -117,15 +117,15 @@ Esta decision esta pensada para detectar comportamiento operativo cercano al tie
 
 - El endpoint aun no tiene autenticacion.
 - El modelo se carga desde una ruta fija.
-- La promocion del modelo hacia `services/src/models` todavia es manual.
+- La seleccion/promocion del modelo dentro de `services/models/kmeans/models` todavia es manual.
 - Algunas features tecnicas siguen en revision.
 - Las labels son clusters no supervisados, no categorias definitivas.
 - El significado de cada label puede cambiar despues de reentrenar.
 
 ## Flujo esperado de uso
 
-1. Entrenar o actualizar el modelo desde el pipeline de produccion.
-2. Copiar/promover el `.joblib` resultante hacia `services/src/models`.
+1. Entrenar o actualizar el modelo desde `services/src/build/build_kmeans_vercel_drains.py`.
+2. Verificar que el `.joblib` resultante exista en `services/models/kmeans/models`.
 3. Levantar el servicio FastAPI.
 4. Consultar `GET /`.
 5. Usar las labels para analisis, monitoreo o decisiones de firewall/cache.

@@ -2,15 +2,17 @@
 
 Pipeline batch para transformar Vercel Log Drains en ventanas clasificadas de comportamiento de user agents.
 
+> Estado actual: legacy/opcional. El entrenamiento principal ahora vive en `services/src/build/build_kmeans_vercel_drains.py`. Este modulo solo debe entenderse como scorer batch para validacion offline si se decide mantenerlo.
+
 Este modulo conecta con Supabase, extrae logs recientes desde `vercel_logs_buffer`, aplica limpieza y feature engineering, carga un artefacto `.joblib` entrenado previamente y genera un CSV con labels por combinacion de `ja4Digest`, `proxy.userAgent` y `proxy.clientIp`.
 
 La idea central no es solo usar KMeans. El valor esta en todo lo que rodea al modelo: ingestion de logs reales, definicion de ventanas, features reproducibles, contrato de artefacto, resultados auditables y una ruta clara para promover el modelo hacia `services/`.
 
 ## Rol dentro del proyecto
 
-`production_pipeline/` funciona como la capa batch del sistema.
+`production_pipeline/` funciona como una capa batch auxiliar del sistema.
 
-En la version alpha publica, `production_pipeline/main.py` hace scoring de una ventana reciente usando un modelo existente. El entrenamiento del artefacto ocurre en el flujo de ML y produce un `.joblib` que despues puede ser usado por este pipeline y por el servicio FastAPI.
+En la version alpha publica, `production_pipeline/main.py` hace scoring de una ventana reciente usando un modelo existente. El entrenamiento del artefacto ocurre en `services/src/build/build_kmeans_vercel_drains.py` y produce un `.joblib` que despues puede ser usado por el servicio FastAPI. Este pipeline batch puede servir para revisar CSVs offline, pero ya no es el flujo canonico.
 
 ## Que hace
 
@@ -53,7 +55,7 @@ flowchart TB
     end
 
     subgraph serving["Promocion"]
-        serviceModel[["Modelo publicado<br/>services/src/models/*.joblib"]]
+        serviceModel[["Modelo publicado<br/>services/models/kmeans/models/*.joblib"]]
         fastapi["FastAPI serving<br/>services/main.py"]
     end
 
@@ -229,17 +231,17 @@ ja4Digest,proxy.userAgent,proxy.clientIp,label,conteo_requests,activity_window_m
 
 `production_pipeline/` genera evidencia batch y trabaja con el artefacto del modelo.
 
-`services/` usa un modelo promovido a:
+`services/` usa un modelo disponible en:
 
 ```txt
-services/src/models/
+services/models/kmeans/models/
 ```
 
 La promocion del modelo todavia es manual en esta version alpha. El flujo esperado es:
 
 1. Entrenar o actualizar el artefacto.
 2. Validar resultados batch en `production_pipeline/results`.
-3. Copiar/promover el `.joblib` aprobado hacia `services/src/models`.
+3. Copiar/promover el `.joblib` aprobado hacia `services/models/kmeans/models`, si no fue generado ahi directamente.
 4. Servir inferencia reciente desde FastAPI.
 
 ## Variables de entorno
