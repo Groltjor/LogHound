@@ -1,4 +1,4 @@
-# Beta from PIDA
+# LogHound
 
 El problema de los userAgents cuando tienes un dominio con funciones serverless es consumir CPU time (incluso con L1 cache) de forma descontrolada. Si bien el cache y usar reglas de firewall mitigan fuertemente este problema, decidí crear una tool que permitiese a usuarios de Vercel tener un pipeline que les ayude a tunear sus reglas de firewall, clasificando a cada userAgent de acuerdo a su comportamiento (hacerlo a mano no es divertido en 100k registros).
 
