@@ -11,3 +11,5 @@ src/utils/statistics.py
 __pycache__
 *.py[cod]
 /src/
+checkpoints
+results
