@@ -8,6 +8,7 @@ Este repo busca presentar una arquitectura sencilla, pero efectiva haciendo deli
 
 - Conexión de Supabase y variables de entorno (SUPABASE_URL) y (SUPABASE_KEY)
 - Proyecto de Next.JS para la interface (En este momento solo es el código fuente)
+- Requerimentos de Librerias se puede revisar en .requeriments
 
 ## Cómo usar:
 
@@ -85,6 +86,19 @@ flowchart TB
     class fastapi service;
     class trainArtifacts,response output;
 ```
+
+## Lectura actual del modelo
+
+La siguiente tabla resume cómo el modelo KMeans está separando los user agents en el artefacto actual. Es una lectura operacional de los centroides: las etiquetas no son clases supervisadas, sino grupos de comportamiento que deben revisarse cuando se reentrene el modelo. (Necesita implementación)
+
+| Label | Patrón observado                     | Requests | Ventana de actividad ms | Mediana entre requests ms | One shot | Lectura práctica                                                                      |
+| ----- | ------------------------------------ | -------: | ----------------------: | ------------------------: | -------: | ------------------------------------------------------------------------------------- |
+| 0     | Request único                        |        1 |                       0 |                         0 |        1 | Visita aislada o agente sin repetición en la ventana.                                 |
+| 1     | Bajo volumen con separación moderada |        3 |                44,768.5 |                     6,279 |        0 | Actividad ligera, probablemente navegación o crawler poco agresivo.                   |
+| 2     | Alto volumen                         |       49 |              44,582,656 |                     2,037 |        0 | Candidato fuerte a crawler agresivo o agente automatizado con muchas rutas visitadas. |
+| 3     | Burst corto                          |        6 |                 2,566.5 |                         0 |        0 | Varias requests concentradas en muy poco tiempo.                                      |
+
+En el estado actual `conteo_requests`, `times_timestamp`, `request_amount` y `routes_visited` tienden a moverse juntos, por eso la lectura principal sale de volumen, ventana de actividad y tiempo entre requests. `Unnamed: 0` aparece en el resumen del artefacto, pero debe tratarse como columna técnica/índice mientras se limpia esa deuda del feature engineering.
 
 ### Nota
 
