@@ -1,0 +1,12 @@
+scipy
+matplotlib
+numpy
+pandas
+geopandas
+google-cloud-bigquery
+supabase
+folium
+shapely
+typing
+google-auth
+streamlit
