@@ -46,6 +46,8 @@ services/models/kmeans/results/
 services/models/kmeans/models/
 ```
 
+Despues de cada reentrenamiento conviene revisar `services/models/kmeans/results/labeled_frame.csv` antes de usar el nuevo artefacto. Las labels de KMeans pueden cambiar entre entrenamientos, por lo que el siguiente paso natural es agregar una etapa post-training que genere un reporte de interpretabilidad: resumen por label, tamaño de clusters, top user agents y ejemplos representativos para decidir si el modelo se acepta o se vuelve a entrenar.
+
 Preferentemente debe entrenarse con una ventana historica amplia, por ejemplo data de 24 horas, para que los clusters tengan suficiente variacion de comportamiento.
 
 ### Nota
