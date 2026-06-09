@@ -1,4 +1,4 @@
-# PIDA Services
+# Log-Hound Services
 
 Servicio de inferencia para clasificar comportamiento de user agents a partir de Vercel Log Drains almacenados en Supabase.
 
