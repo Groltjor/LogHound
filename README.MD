@@ -127,6 +127,8 @@ next_interface
 
 La interface de LogHound permite leer los últimos 10 minutos de datos desde supabase almacenando vercel log drains a traves del servicio principal de endpoint de FastAPI, almacena en data y posteriormente puede inicializarce la interfaz.
 
+También la nueva versión permite bloquear reglas de firewall en producción con SDK aún faltan correcciones de ux/ui sin embargo ya se administra el log de reglas de firewall y permite consumir y tener observabilidad en 10 minutos en userAgents.
+
 ![Imagen 2.1 Ventana de conexión a FastAPI predict](images/train_next.png)
 
 ![Imagen 2.2 - Visualización de clusters](images/label_space.png)
