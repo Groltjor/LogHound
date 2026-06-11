@@ -2,7 +2,7 @@
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Html, Line, OrbitControls, Stars } from "@react-three/drei";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Bot,
@@ -14,8 +14,10 @@ import {
   Timer,
 } from "lucide-react";
 import * as THREE from "three";
+import { listLogHoundAgentRules } from "./contramedidas/actions/firewallRuleActions";
 import SelectionPanel from "./contramedidas/SelectionPanel";
 import SpaceMenu from "./dashboards/menu/SpaceMenu";
+import SecurityResourcesMenu from "./security/SecurityResourcesMenu";
 import { formatMs, formatNumber } from "./utils/formatters";
 
 const ENDPOINT = process.env.NEXT_PUBLIC_ML_TRAFFIC_ENDPOINT || "/data/predictions.json";
@@ -59,6 +61,26 @@ const BOOT_MESSAGES = [
   "Servicios online",
 ];
 const BOOT_STEP_MS = 420;
+
+function dedupeRules(rules) {
+  const seen = new Set();
+  return rules.filter((rule) => {
+    const key = `${rule.action}-${rule.operator}-${rule.conditionValue}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function ruleMatchesUserAgent(rule, userAgent) {
+  if (!rule?.conditionValue || !userAgent) return false;
+  if (rule.operator === "contains") return userAgent.includes(rule.conditionValue);
+  return userAgent === rule.conditionValue;
+}
+
+function getAppliedRulesForUserAgent(rules, userAgent) {
+  return dedupeRules(rules.filter((rule) => ruleMatchesUserAgent(rule, userAgent)));
+}
 
 function hashString(input) {
   let hash = 0;
@@ -181,6 +203,7 @@ function buildClusters(records) {
         activityWindowMs: agentGroup.records.reduce((sum, item) => sum + item.activityWindowMs, 0),
         ips: agentGroup.records.length,
         oneShotCount: agentGroup.records.filter((item) => item.oneShot).length,
+        appliedRules: dedupeRules(agentGroup.records.flatMap((item) => item.appliedRules || [])),
       }));
 
       const requests = labelGroup.records.reduce((sum, item) => sum + item.requests, 0);
@@ -195,6 +218,7 @@ function buildClusters(records) {
         ips: new Set(labelGroup.records.map((item) => item.clientIp)).size,
         oneShotCount,
         recurrentCount: labelGroup.records.length - oneShotCount,
+        appliedRules: dedupeRules(labelGroup.records.flatMap((item) => item.appliedRules || [])),
       };
     })
     .sort((a, b) => Number(a.label) - Number(b.label));
@@ -254,12 +278,15 @@ function getLockCameraPosition(lockPoint, isCompact, targetRadius = 0.8) {
   return lockPoint.clone().add(direction.multiplyScalar(distance));
 }
 
-function getLockLookAt(lockPoint, cameraPosition, isCompact) {
+function getLockLookAt(lockPoint, cameraPosition, isCompact, viewportSize, cameraFov = 48) {
   if (isCompact) return lockPoint.clone();
 
   const forward = lockPoint.clone().sub(cameraPosition).normalize();
   const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-  return lockPoint.clone().add(right.multiplyScalar(2.15));
+  const aspect = viewportSize.width / Math.max(1, viewportSize.height);
+  const distance = cameraPosition.distanceTo(lockPoint);
+  const halfWidth = Math.tan(THREE.MathUtils.degToRad(cameraFov) / 2) * distance * aspect;
+  return lockPoint.clone().add(right.multiplyScalar(halfWidth * 0.5));
 }
 
 function CameraDirector({ viewMode, activeLabel, activeAgent, selectedRecord, selectedRadius }) {
@@ -287,8 +314,11 @@ function CameraDirector({ viewMode, activeLabel, activeAgent, selectedRecord, se
     return new THREE.Vector3(0, isCompact ? 3.4 : 2.6, isCompact ? 18 : 12);
   }, [activeAgent, activeLabel, isCompact, lockPoint, selectedRadius, viewMode]);
   const lookAtTarget = useMemo(
-    () => (lockPoint ? getLockLookAt(lockPoint, target, isCompact) : new THREE.Vector3(0, 0, 0)),
-    [isCompact, lockPoint, target],
+    () =>
+      lockPoint
+        ? getLockLookAt(lockPoint, target, isCompact, size, camera.isPerspectiveCamera ? camera.fov : 48)
+        : new THREE.Vector3(0, 0, 0),
+    [camera, isCompact, lockPoint, size, target],
   );
 
   useEffect(() => {
@@ -306,7 +336,7 @@ function CameraDirector({ viewMode, activeLabel, activeAgent, selectedRecord, se
 }
 
 function SceneOrbitControls({ activeAgent, selectedRecord, selectedRadius }) {
-  const { size } = useThree();
+  const { camera, size } = useThree();
   const controlsRef = useRef(null);
   const isCompact = size.width < 720;
   const controlsTarget = useMemo(() => {
@@ -316,8 +346,8 @@ function SceneOrbitControls({ activeAgent, selectedRecord, selectedRadius }) {
     if (!lockPoint) return new THREE.Vector3(0, 0, 0);
 
     const cameraPosition = getLockCameraPosition(lockPoint, isCompact, selectedRadius);
-    return getLockLookAt(lockPoint, cameraPosition, isCompact);
-  }, [activeAgent, isCompact, selectedRadius, selectedRecord]);
+    return getLockLookAt(lockPoint, cameraPosition, isCompact, size, camera.isPerspectiveCamera ? camera.fov : 48);
+  }, [activeAgent, camera, isCompact, selectedRadius, selectedRecord, size]);
 
   useEffect(() => {
     if (!controlsRef.current) return;
@@ -351,8 +381,10 @@ function SpaceSphere({
   onSelect,
   onHover,
 }) {
-  const groupRef = useRef(null);
-  const displayColor = mitigated ? "#34d399" : locked ? "#fb923c" : color;
+	  const groupRef = useRef(null);
+	  const appliedRules = item.appliedRules || [];
+	  const actioned = mitigated || appliedRules.length > 0;
+	  const displayColor = actioned ? "#34d399" : locked ? "#fb923c" : color;
   const materialColor = useMemo(() => new THREE.Color(displayColor), [displayColor]);
   const softColor = useMemo(() => new THREE.Color(displayColor).lerp(new THREE.Color("#ffffff"), 0.22), [displayColor]);
   const highlighted = selected || focused || locked;
@@ -361,8 +393,9 @@ function SpaceSphere({
   useFrame(({ clock }) => {
     if (!groupRef.current) return;
     const seed = (hashString(item.id) % 100) / 100;
-    groupRef.current.position.y = position[1] + Math.sin(clock.elapsedTime * 0.9 + seed * 8) * 0.08;
-    groupRef.current.rotation.y += 0.004 + seed * 0.002;
+    const floatOffset = locked ? 0 : Math.sin(clock.elapsedTime * 0.32 + seed * 8) * 0.045;
+    groupRef.current.position.y = position[1] + floatOffset;
+    groupRef.current.rotation.y += locked ? 0.0008 : 0.0014 + seed * 0.0007;
   });
 
   return (
@@ -438,19 +471,26 @@ function SpaceSphere({
           </div>
         </Html>
       ) : null}
-      {locked ? (
-        <Html position={[0, radius + 0.9, 0]} center zIndexRange={[45, 20]} style={{ pointerEvents: "none" }}>
-          <div
-            className={`pointer-events-none rounded-md border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] shadow-[0_0_24px_rgba(251,146,60,.4)] backdrop-blur-md ${
-              mitigated
-                ? "border-emerald-300/60 bg-emerald-300/18 text-emerald-50"
-                : "border-orange-300/55 bg-orange-400/15 text-orange-100"
-            }`}
-          >
-            {mitigated ? "Medidas tomadas" : "Seleccionado"}
-          </div>
-        </Html>
-      ) : null}
+	      {actioned && !locked ? (
+	        <Html position={[0, radius + 0.78, 0]} center zIndexRange={[44, 18]} style={{ pointerEvents: "none" }}>
+	          <div className="pointer-events-none rounded-md border border-emerald-300/42 bg-emerald-300/14 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.15em] text-emerald-100 shadow-[0_0_18px_rgba(52,211,153,.22)] backdrop-blur-md">
+	            Acciones tomadas
+	          </div>
+	        </Html>
+	      ) : null}
+	      {locked ? (
+	        <Html position={[0, radius + 0.9, 0]} center zIndexRange={[45, 20]} style={{ pointerEvents: "none" }}>
+	          <div
+	            className={`pointer-events-none rounded-md border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] shadow-[0_0_24px_rgba(251,146,60,.4)] backdrop-blur-md ${
+	              actioned
+	                ? "border-emerald-300/60 bg-emerald-300/18 text-emerald-50"
+	                : "border-orange-300/55 bg-orange-400/15 text-orange-100"
+	            }`}
+	          >
+	            {actioned ? "Acciones tomadas" : "Seleccionado"}
+	          </div>
+	        </Html>
+	      ) : null}
       {transitioning ? <LayerTransitionBurst color={displayColor} radius={radius} /> : null}
     </group>
   );
@@ -603,10 +643,10 @@ function SpaceScene({
             <Line
               key={`line-${item.id}`}
               points={[[0, 0, 0], item.__position]}
-              color={labelColor(item.label)}
+              color={(item.appliedRules || []).length > 0 ? "#34d399" : labelColor(item.label)}
               lineWidth={1}
               transparent
-              opacity={0.34}
+              opacity={(item.appliedRules || []).length > 0 ? 0.52 : 0.34}
             />
           ))
         : null}
@@ -621,7 +661,7 @@ function SpaceScene({
           selected={activeAgent?.id === item.id || hovered?.id === item.id}
           focused={hovered?.id === item.id}
           locked={selectedRecord?.id === item.id}
-          mitigated={mitigatedTargetId === item.id}
+          mitigated={mitigatedTargetId === item.id || (item.appliedRules || []).length > 0}
           transitioning={layerTransition?.itemId === item.id && layerTransition.phase === "exit"}
           focusActive={focusActive}
           lockActive={lockActive}
@@ -638,7 +678,7 @@ function SpaceScene({
         <TargetLockConnector
           item={selectedRecord}
           radius={selectedRadius}
-          mitigated={mitigatedTargetId === selectedRecord.id}
+          mitigated={mitigatedTargetId === selectedRecord.id || (selectedRecord.appliedRules || []).length > 0}
         />
       ) : null}
 
@@ -719,8 +759,9 @@ function TacticalHoverPanel({ item, radius }) {
   const size = Math.max(72, Math.min(156, radius * 58));
   const line = item.type === "label" ? 300 : 250;
   const position = item.__position;
-  const side = position[0] > 0 ? "left" : "right";
-  const recurrentCount = isAgent ? item.ips - item.oneShotCount : item.recurrentCount;
+	  const side = position[0] > 0 ? "left" : "right";
+	  const recurrentCount = isAgent ? item.ips - item.oneShotCount : item.recurrentCount;
+	  const appliedRules = item.appliedRules || [];
   const statItems = isAgent
     ? [
         { label: "IPs detectadas", value: formatNumber(item.ips), icon: Globe2 },
@@ -800,7 +841,7 @@ function TacticalHoverPanel({ item, radius }) {
           ))}
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+	        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-md border border-emerald-200/15 bg-emerald-200/10 p-3">
             <div className="text-[11px] uppercase tracking-normal text-emerald-100/60">Recurrentes</div>
             <div className="mt-1 font-semibold text-emerald-50">{formatNumber(recurrentCount)}</div>
@@ -809,9 +850,29 @@ function TacticalHoverPanel({ item, radius }) {
             <div className="text-[11px] uppercase tracking-normal text-slate-100/60">One-shot</div>
             <div className="mt-1 font-semibold text-slate-50">{formatNumber(item.oneShotCount)}</div>
           </div>
-        </div>
-      </div>
-    </aside>
+	        </div>
+	        {appliedRules.length > 0 ? (
+	          <div className="mt-3 rounded-md border border-emerald-300/22 bg-emerald-300/10 p-3 shadow-[0_0_22px_rgba(52,211,153,.1)]">
+	            <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-100/68">
+	              Acciones tomadas
+	            </div>
+	            <div className="mt-2 grid gap-1.5">
+	              {appliedRules.slice(0, 3).map((rule) => (
+	                <div
+	                  key={`${rule.action}-${rule.operator}-${rule.conditionValue}`}
+	                  className="flex items-center justify-between gap-2 rounded border border-white/10 bg-black/20 px-2 py-1.5 text-xs"
+	                >
+	                  <span className="font-semibold uppercase tracking-[0.08em] text-emerald-100">{rule.action}</span>
+	                  <span className="max-w-48 truncate font-mono text-emerald-50/72">
+	                    user_agent {rule.operator} {rule.conditionValue}
+	                  </span>
+	                </div>
+	              ))}
+	            </div>
+	          </div>
+	        ) : null}
+	      </div>
+	    </aside>
       </div>
     </Html>
   );
@@ -827,7 +888,7 @@ function TargetLockConnector({ item, radius, mitigated }) {
 
   return (
     <Html
-      position={[position[0], position[1] + radius * 0.18, position[2]]}
+      position={position}
       center
       zIndexRange={[70, 30]}
       style={{ pointerEvents: "none" }}
@@ -854,6 +915,8 @@ function TargetLockConnector({ item, radius, mitigated }) {
 
 export default function SpaceClient() {
   const [records, setRecords] = useState([]);
+  const [firewallRules, setFirewallRules] = useState([]);
+  const [firewallRulesError, setFirewallRulesError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [metric, setMetric] = useState("requests");
@@ -870,8 +933,19 @@ export default function SpaceClient() {
   const [bootComplete, setBootComplete] = useState(false);
   const layerTransitionTimers = useRef([]);
 
-  useEffect(() => {
-    let alive = true;
+  const refreshFirewallRules = useCallback(async () => {
+    try {
+      const result = await listLogHoundAgentRules();
+      setFirewallRules(Array.isArray(result.rules) ? result.rules : []);
+      setFirewallRulesError("");
+    } catch (rulesError) {
+      setFirewallRules([]);
+      setFirewallRulesError(rulesError instanceof Error ? rulesError.message : "No se pudieron leer reglas Log Hound");
+    }
+  }, []);
+
+	  useEffect(() => {
+	    let alive = true;
 
     async function load() {
       try {
@@ -886,10 +960,30 @@ export default function SpaceClient() {
       }
     }
 
-    load();
+	    load();
+	    return () => {
+	      alive = false;
+	      document.body.style.cursor = "default";
+	    };
+	  }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    listLogHoundAgentRules()
+      .then((result) => {
+        if (!alive) return;
+        setFirewallRules(Array.isArray(result.rules) ? result.rules : []);
+        setFirewallRulesError("");
+      })
+      .catch((rulesError) => {
+        if (!alive) return;
+        setFirewallRules([]);
+        setFirewallRulesError(rulesError instanceof Error ? rulesError.message : "No se pudieron leer reglas Log Hound");
+      });
+
     return () => {
       alive = false;
-      document.body.style.cursor = "default";
     };
   }, []);
 
@@ -914,21 +1008,36 @@ export default function SpaceClient() {
     };
   }, []);
 
+  const annotatedRecords = useMemo(
+    () =>
+      records.map((record) => ({
+        ...record,
+        appliedRules: getAppliedRulesForUserAgent(firewallRules, record.userAgent),
+      })),
+    [firewallRules, records],
+  );
+
   const filteredRecords = useMemo(() => {
     const cleanQuery = query.trim().toLowerCase();
-    if (!cleanQuery) return records;
-    return records.filter(
+    if (!cleanQuery) return annotatedRecords;
+    return annotatedRecords.filter(
       (record) =>
         record.userAgent.toLowerCase().includes(cleanQuery) ||
         record.agentName.toLowerCase().includes(cleanQuery) ||
         record.clientIp.toLowerCase().includes(cleanQuery) ||
         record.ja4Digest.toLowerCase().includes(cleanQuery),
     );
-  }, [query, records]);
+  }, [annotatedRecords, query]);
 
   const clusters = useMemo(() => buildClusters(filteredRecords), [filteredRecords]);
   const activeLabel = clusters.find((cluster) => cluster.id === activeLabelId) || null;
   const activeAgent = activeLabel?.agents.find((agent) => agent.id === activeAgentId) || null;
+  const selectedRecordWithRules = selectedRecord
+    ? {
+        ...selectedRecord,
+        appliedRules: getAppliedRulesForUserAgent(firewallRules, selectedRecord.userAgent),
+      }
+    : null;
   const totalRequests = filteredRecords.reduce((sum, item) => sum + item.requests, 0);
   const totalRoutes = filteredRecords.reduce((sum, item) => sum + item.routes, 0);
   const recurrentCount = filteredRecords.filter((item) => !item.oneShot).length;
@@ -1031,7 +1140,7 @@ export default function SpaceClient() {
     { label: "Sector", value: "Espacio de labels" },
     ...(activeLabel ? [{ label: `Label ${activeLabel.label}`, value: activeLabel.name }] : []),
     ...(activeAgent ? [{ label: "Agent", value: activeAgent.name }] : []),
-    ...(selectedRecord ? [{ label: "IP", value: selectedRecord.clientIp }] : []),
+	    ...(selectedRecordWithRules ? [{ label: "IP", value: selectedRecordWithRules.clientIp }] : []),
   ];
   const tacticalHover =
     hovered?.type === "label" || (hovered?.type === "agent" && activeLabel && !activeAgent)
@@ -1052,7 +1161,7 @@ export default function SpaceClient() {
             activeAgent={activeAgent}
             metric={metric}
             hovered={hovered}
-            selectedRecord={selectedRecord}
+	          selectedRecord={selectedRecordWithRules}
             mitigatedTargetId={mitigatedTargetId}
             layerTransition={layerTransition}
             setHovered={setHovered}
@@ -1067,8 +1176,9 @@ export default function SpaceClient() {
         }`}
       />
       <LayerWarpOverlay transition={layerTransition} />
+      <SecurityResourcesMenu />
 
-      {!selectedRecord ? (
+	      {!selectedRecordWithRules ? (
         <>
           <SpaceMenu
             drawerOpen={drawerOpen}
@@ -1128,7 +1238,7 @@ export default function SpaceClient() {
             <SelectionPanel
               loading={loading}
               error={error}
-              selectedRecord={selectedRecord}
+	              selectedRecord={selectedRecordWithRules}
               activeAgent={activeAgent}
               activeLabel={activeLabel}
               measuresOpen={measuresOpen}
@@ -1138,8 +1248,14 @@ export default function SpaceClient() {
                 setMitigatedTargetId(null);
                 setMeasuresOpen(false);
               }}
-              onMitigationComplete={() => setMitigatedTargetId(selectedRecord?.id || null)}
-            />
+	              onMitigationComplete={() => {
+	                setMitigatedTargetId(selectedRecordWithRules?.id || null);
+	                refreshFirewallRules();
+	              }}
+	              onMitigationRemoved={() => setMitigatedTargetId(null)}
+	              onFirewallRulesChange={refreshFirewallRules}
+	              firewallRulesError={firewallRulesError}
+	            />
           </div>
 
           <div className="pointer-events-none absolute left-1/2 top-1/2 z-10 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-white/45 backdrop-blur-md md:flex">
@@ -1151,7 +1267,7 @@ export default function SpaceClient() {
         <SelectionPanel
           loading={loading}
           error={error}
-          selectedRecord={selectedRecord}
+	          selectedRecord={selectedRecordWithRules}
           activeAgent={activeAgent}
           activeLabel={activeLabel}
           measuresOpen={measuresOpen}
@@ -1161,9 +1277,15 @@ export default function SpaceClient() {
             setMitigatedTargetId(null);
             setMeasuresOpen(false);
           }}
-          mitigationComplete={mitigatedTargetId === selectedRecord?.id}
-          onMitigationComplete={() => setMitigatedTargetId(selectedRecord?.id || null)}
-        />
+	          mitigationComplete={mitigatedTargetId === selectedRecordWithRules?.id || (selectedRecordWithRules?.appliedRules || []).length > 0}
+	          onMitigationComplete={() => {
+	            setMitigatedTargetId(selectedRecordWithRules?.id || null);
+	            refreshFirewallRules();
+	          }}
+	          onMitigationRemoved={() => setMitigatedTargetId(null)}
+	          onFirewallRulesChange={refreshFirewallRules}
+	          firewallRulesError={firewallRulesError}
+	        />
       )}
       {loading || !bootComplete ? <BootSplash step={bootStep} /> : null}
     </main>

@@ -199,6 +199,124 @@ input {
   }
 }
 
+@keyframes wizardCardEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes wizardStepEnter {
+  0% {
+    opacity: 0;
+    transform: translateX(-18px) scale(0.99);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes wizardPulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(251, 146, 60, 0);
+  }
+  38% {
+    transform: scale(1.018);
+    box-shadow: 0 0 34px rgba(251, 146, 60, 0.3);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 28px rgba(251, 146, 60, 0.18);
+  }
+}
+
+@keyframes wizardBridgeScan {
+  0% {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0.78;
+    transform: translateY(0);
+  }
+}
+
+@keyframes wizardPanelReveal {
+  0% {
+    opacity: 0;
+    transform: translateY(22px) scale(0.975);
+    filter: blur(4px);
+  }
+  28% {
+    opacity: 0.38;
+  }
+  46% {
+    opacity: 0.2;
+    transform: translateY(8px) scale(1.004);
+    filter: blur(1px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes wizardCorePulse {
+  0%,
+  100% {
+    box-shadow: 0 0 18px rgba(251, 146, 60, 0.18);
+  }
+  50% {
+    box-shadow: 0 0 34px rgba(251, 146, 60, 0.42);
+  }
+}
+
+@keyframes wizardRuleScan {
+  0% {
+    transform: translateY(-110%);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.72;
+  }
+  100% {
+    transform: translateY(240%);
+    opacity: 0;
+  }
+}
+
+@keyframes rulePreviewPulse {
+  0%,
+  100% {
+    border-color: rgba(34, 211, 238, 0.22);
+    box-shadow:
+      0 0 18px rgba(34, 211, 238, 0.06),
+      inset 0 0 14px rgba(34, 211, 238, 0.03);
+  }
+  48% {
+    border-color: rgba(34, 211, 238, 0.32);
+    box-shadow:
+      0 0 24px rgba(34, 211, 238, 0.09),
+      0 0 14px rgba(251, 146, 60, 0.025),
+      inset 0 0 18px rgba(34, 211, 238, 0.045);
+  }
+}
+
 .boot-radar {
   position: relative;
   width: 138px;
@@ -462,4 +580,68 @@ input {
 .tactical-connector[data-side="left"] .tactical-lock-badge {
   left: auto;
   right: calc(50% + var(--connector-line) + 14px);
+}
+
+.wizard-action-card {
+  animation: wizardCardEnter 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.wizard-step-screen {
+  animation: wizardStepEnter 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.wizard-action-selected {
+  animation: wizardPulse 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.wizard-stage-bridge {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  color: rgba(254, 215, 170, 0.74);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  animation: wizardBridgeScan 360ms ease-out both;
+}
+
+.wizard-stage-bridge div {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(251, 146, 60, 0.82), rgba(34, 211, 238, 0.24));
+}
+
+.wizard-stage-bridge div:last-child {
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0.24), rgba(251, 146, 60, 0.82), transparent);
+}
+
+.wizard-rule-panel {
+  position: relative;
+  animation: wizardPanelReveal 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.wizard-rule-panel::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 42%;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(251, 146, 60, 0.16),
+    rgba(34, 211, 238, 0.12),
+    transparent
+  );
+  animation: wizardRuleScan 760ms 120ms ease-out both;
+}
+
+.wizard-rule-core {
+  animation: wizardCorePulse 1.25s ease-in-out infinite;
+}
+
+.rule-preview-panel {
+  animation: rulePreviewPulse 2.8s ease-in-out infinite;
 }
