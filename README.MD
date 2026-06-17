@@ -13,6 +13,10 @@ Este repo busca presentar una arquitectura sencilla, pero efectiva haciendo deli
 - Proyecto de Next.JS para la interface (En este momento solo es el código fuente)
 - Requerimentos de Librerias se puede revisar en .requeriments
 
+## Update 17 jun 2026
+
+He estado trabajando en robusteser el dashboard, aun restan ideas por integrar. El punto más importante, estoy valorando mejorar el modelo fundacional utilizando mas a fondo los hash JA4 y además revalorar la ventana de entrenamiento. En este momento no es recomendable utilizarlo para tomar acción, requiere agrupamiento de ventanas de 10 minutos y ajustar algunas variabels durante el Feature Engineering.
+
 ## Arquitectura del sistema
 
 ```mermaid

@@ -265,12 +265,25 @@ export default function SelectionPanel({
   const conditionPreview = selectedRecord
     ? `user_agent ${conditionOperator} ${normalizedConditionTarget || "<sin target>"}`
     : "";
-  const canConfirmRule = Boolean(normalizedConditionTarget) && deploymentState !== "loading" && deploymentState !== "done";
   const appliedRules = selectedRecord?.appliedRules || [];
   const selectedRule = useMemo(
     () => COUNTERMEASURES.find((rule) => rule.id === selectedRuleId) || null,
     [selectedRuleId],
   );
+  const hasDenyRule = appliedRules.some((rule) => rule.action === "deny");
+  const selectedRuleAlreadyApplied = selectedRule
+    ? appliedRules.some((rule) => rule.action === selectedRule.ruleAction)
+    : false;
+  const deploymentBlockedReason = hasDenyRule
+    ? "Este user agent ya tiene una regla deny aplicada. Remuevela antes de crear otra accion."
+    : selectedRuleAlreadyApplied
+      ? `Este user agent ya tiene una regla ${selectedRule.ruleAction} aplicada.`
+      : "";
+  const canConfirmRule =
+    Boolean(normalizedConditionTarget) &&
+    deploymentState !== "loading" &&
+    deploymentState !== "done" &&
+    !deploymentBlockedReason;
   const wizardStep = selectedRule ? 2 : 1;
 
   useEffect(() => {
@@ -289,6 +302,11 @@ export default function SelectionPanel({
 
   async function deploySelectedRule() {
     if (!selectedRule) return;
+    if (!canConfirmRule) {
+      setConfirmRuleOpen(false);
+      setDeploymentError(deploymentBlockedReason || "No se puede desplegar esta regla.");
+      return;
+    }
 
     setConfirmRuleOpen(false);
     setDeploymentError("");
@@ -355,6 +373,9 @@ export default function SelectionPanel({
 
   function selectRule(ruleId) {
     if (pendingRuleId) return;
+    const nextRule = COUNTERMEASURES.find((rule) => rule.id === ruleId);
+    if (!nextRule) return;
+    if (hasDenyRule || appliedRules.some((rule) => rule.action === nextRule.ruleAction)) return;
 
     setConfirmRuleOpen(false);
     setTargetInspectorOpen(false);
@@ -499,36 +520,54 @@ export default function SelectionPanel({
 
 	            {!selectedRule ? (
               <div className="wizard-step-screen grid gap-3 transition-all duration-300">
-                {COUNTERMEASURES.map(({ id, title, action, description, icon: Icon, tone, ruleAction }, index) => (
-                  <button
-                    key={id}
-                    type="button"
-                    disabled={Boolean(pendingRuleId)}
-                    onClick={() => selectRule(id)}
-                    style={{ animationDelay: `${index * 55}ms` }}
-                    className={`wizard-action-card rounded-md border p-4 text-left transition hover:scale-[1.01] disabled:cursor-default ${
-                      pendingRuleId === id
-                        ? "wizard-action-selected border-orange-200/55 bg-orange-300/14 text-orange-50 shadow-[0_0_28px_rgba(251,146,60,.18)]"
-                        : `${tone} ${pendingRuleId ? "opacity-[0.38] saturate-50" : ""}`
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 rounded-md border border-white/10 bg-black/20 p-2">
-                        <Icon size={18} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-3">
-                          <h4 className="font-semibold">{title}</h4>
-                          <span className="rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em]">
-                            {ruleAction}
-                          </span>
+                {COUNTERMEASURES.map(({ id, title, action, description, icon: Icon, tone, ruleAction }, index) => {
+                  const alreadyApplied = appliedRules.some((rule) => rule.action === ruleAction);
+                  const ruleBlocked = hasDenyRule || alreadyApplied;
+                  const disabled = Boolean(pendingRuleId) || ruleBlocked;
+
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => selectRule(id)}
+                      style={{ animationDelay: `${index * 55}ms` }}
+                      className={`wizard-action-card rounded-md border p-4 text-left transition hover:scale-[1.01] disabled:cursor-default ${
+                        pendingRuleId === id
+                          ? "wizard-action-selected border-orange-200/55 bg-orange-300/14 text-orange-50 shadow-[0_0_28px_rgba(251,146,60,.18)]"
+                          : `${tone} ${disabled ? "opacity-[0.48] saturate-50" : ""}`
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 rounded-md border border-white/10 bg-black/20 p-2">
+                          <Icon size={18} />
                         </div>
-                        <div className="mt-1 text-sm font-medium text-white">{action}</div>
-                        <p className="mt-1 text-sm leading-6 text-white/62">{description}</p>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <h4 className="font-semibold">{title}</h4>
+                            <span
+                              className={`rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${
+                                ruleBlocked
+                                  ? "border-emerald-300/24 bg-emerald-300/12 text-emerald-100"
+                                  : "border-white/10 bg-black/20"
+                              }`}
+                            >
+                              {ruleBlocked ? (alreadyApplied ? "Aplicada" : "Bloqueado") : ruleAction}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-sm font-medium text-white">{action}</div>
+                          <p className="mt-1 text-sm leading-6 text-white/62">
+                            {hasDenyRule
+                              ? "Este user agent ya tiene deny aplicado; remueve la accion para desplegar otra."
+                              : alreadyApplied
+                                ? "Esta accion ya fue aplicada para este user agent."
+                                : description}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
             ) : (
               <div className="wizard-rule-panel overflow-visible rounded-md border border-orange-200/30 bg-zinc-950/72 p-4 shadow-2xl shadow-orange-950/25 backdrop-blur-xl">
@@ -766,7 +805,7 @@ export default function SelectionPanel({
                     className={`mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold transition ${
                       deploymentState === "done"
                         ? "border-emerald-300/45 bg-emerald-300/16 text-emerald-100"
-                        : normalizedConditionTarget
+                        : normalizedConditionTarget && !deploymentBlockedReason
                           ? "border-orange-300/45 bg-orange-300/16 text-orange-100 hover:bg-orange-300/22"
                           : "cursor-not-allowed border-white/10 bg-white/[0.05] text-white/36"
                     }`}
@@ -798,9 +837,15 @@ export default function SelectionPanel({
                     </div>
                   ) : null}
 
-                  {deploymentError ? (
-                    <div className="mt-3 rounded-md border border-red-300/24 bg-red-300/10 p-3 text-sm leading-6 text-red-100">
-                      {deploymentError}
+	                  {deploymentError ? (
+	                    <div className="mt-3 rounded-md border border-red-300/24 bg-red-300/10 p-3 text-sm leading-6 text-red-100">
+	                      {deploymentError}
+	                    </div>
+	                  ) : null}
+
+                  {deploymentBlockedReason ? (
+                    <div className="mt-3 rounded-md border border-emerald-300/24 bg-emerald-300/10 p-3 text-sm leading-6 text-emerald-100">
+                      {deploymentBlockedReason}
                     </div>
                   ) : null}
                 </div>

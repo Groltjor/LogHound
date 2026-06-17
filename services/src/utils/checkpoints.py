@@ -8,7 +8,7 @@ def check_for_negatives(
     frame_candidatos : pd.DataFrame,
     standard_cols : list[str]
     
-    ) -> json:
+    ) -> dict[str, list[str]]:
 
     cols_to_yeo = []
     cols_to_np1log = []

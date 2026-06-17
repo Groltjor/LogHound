@@ -1,4 +1,5 @@
-import { Activity, ChevronLeft, ChevronRight, Database, Menu, Route, ShieldAlert, Sparkles, X } from "lucide-react";
+import Link from "next/link";
+import { Activity, ChevronLeft, ChevronRight, Database, Home, Menu, Route, ShieldAlert, Sparkles, X } from "lucide-react";
 import { formatNumber } from "../../utils/formatters";
 
 function StatPill({ icon: Icon, label, value }) {
@@ -134,10 +135,18 @@ export default function SpaceMenu({
             >
               <X size={17} />
             </button>
-          </div>
+	          </div>
+	
+          <Link
+            href="/"
+            className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-md border border-orange-200/24 bg-orange-300/10 px-3 text-sm font-semibold text-orange-100 shadow-[0_0_18px_rgba(251,146,60,.12)] transition hover:border-orange-200/45 hover:bg-orange-300/16"
+          >
+            <Home size={16} />
+            Ir al home
+          </Link>
 
-          <div className="mt-5">
-            <div className="text-[11px] uppercase tracking-normal text-white/45">Metrica visual</div>
+	          <div className="mt-5">
+	            <div className="text-[11px] uppercase tracking-normal text-white/45">Metrica visual</div>
             <div className="mt-2 grid grid-cols-3 gap-2">
               {metrics.map((item) => (
                 <button

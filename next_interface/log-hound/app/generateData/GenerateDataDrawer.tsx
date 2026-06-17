@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity,
   Bot,
   CheckCircle2,
   ChevronRight,
@@ -15,7 +14,6 @@ import {
   Orbit,
   Play,
   RadioTower,
-  ShieldCheck,
   Sparkles,
   X,
   Zap,
@@ -573,9 +571,9 @@ export default function GenerateDataDrawer() {
       <button
         type="button"
         onClick={openDrawer}
-        className="inline-flex h-11 items-center gap-2 rounded-md border border-zinc-950/15 px-4 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-950/5"
+        className="inline-flex h-11 items-center gap-2 rounded-md border border-cyan-200/28 bg-black/32 px-4 text-sm font-semibold text-cyan-50 shadow-[0_0_24px_rgba(34,211,238,.13)] backdrop-blur-md transition hover:border-cyan-200/50 hover:bg-cyan-200/12"
       >
-        <Sparkles size={16} />
+        <Sparkles size={16} className="text-orange-200" />
         Generar data
       </button>
 

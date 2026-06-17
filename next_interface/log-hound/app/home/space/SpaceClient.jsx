@@ -21,7 +21,8 @@ import SecurityResourcesMenu from "./security/SecurityResourcesMenu";
 import { formatMs, formatNumber } from "./utils/formatters";
 
 const ENDPOINT = process.env.NEXT_PUBLIC_ML_TRAFFIC_ENDPOINT || "/data/predictions.json";
-const LABEL_COLORS = ["#38bdf8", "#fb7185", "#34d399", "#a78bfa", "#fbbf24", "#22d3ee"];
+const ACTION_TAKEN_COLOR = "#34d399";
+const LABEL_COLORS = ["#38bdf8", "#fb7185", "#fbbf24", "#a78bfa", "#22d3ee", "#f472b6"];
 const LABEL_PROFILES = {
   0: {
     name: "Visitas casi aisladas",
@@ -378,13 +379,14 @@ function SpaceSphere({
   transitioning,
   focusActive,
   lockActive,
+  actionVisual,
   onSelect,
   onHover,
 }) {
-	  const groupRef = useRef(null);
-	  const appliedRules = item.appliedRules || [];
-	  const actioned = mitigated || appliedRules.length > 0;
-	  const displayColor = actioned ? "#34d399" : locked ? "#fb923c" : color;
+  const groupRef = useRef(null);
+  const appliedRules = item.appliedRules || [];
+  const actioned = actionVisual && (mitigated || appliedRules.length > 0);
+  const displayColor = actioned ? ACTION_TAKEN_COLOR : locked ? "#fb923c" : color;
   const materialColor = useMemo(() => new THREE.Color(displayColor), [displayColor]);
   const softColor = useMemo(() => new THREE.Color(displayColor).lerp(new THREE.Color("#ffffff"), 0.22), [displayColor]);
   const highlighted = selected || focused || locked;
@@ -643,7 +645,7 @@ function SpaceScene({
             <Line
               key={`line-${item.id}`}
               points={[[0, 0, 0], item.__position]}
-              color={(item.appliedRules || []).length > 0 ? "#34d399" : labelColor(item.label)}
+              color={(item.appliedRules || []).length > 0 ? ACTION_TAKEN_COLOR : labelColor(item.label)}
               lineWidth={1}
               transparent
               opacity={(item.appliedRules || []).length > 0 ? 0.52 : 0.34}
@@ -665,6 +667,7 @@ function SpaceScene({
           transitioning={layerTransition?.itemId === item.id && layerTransition.phase === "exit"}
           focusActive={focusActive}
           lockActive={lockActive}
+          actionVisual={viewMode !== "universe"}
           onSelect={onSelect}
           onHover={setHovered}
         />
@@ -759,9 +762,9 @@ function TacticalHoverPanel({ item, radius }) {
   const size = Math.max(72, Math.min(156, radius * 58));
   const line = item.type === "label" ? 300 : 250;
   const position = item.__position;
-	  const side = position[0] > 0 ? "left" : "right";
-	  const recurrentCount = isAgent ? item.ips - item.oneShotCount : item.recurrentCount;
-	  const appliedRules = item.appliedRules || [];
+  const side = position[0] > 0 ? "left" : "right";
+  const recurrentCount = isAgent ? item.ips - item.oneShotCount : item.recurrentCount;
+  const appliedRules = isAgent ? item.appliedRules || [] : [];
   const statItems = isAgent
     ? [
         { label: "IPs detectadas", value: formatNumber(item.ips), icon: Globe2 },
