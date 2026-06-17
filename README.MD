@@ -17,6 +17,8 @@ Este repo busca presentar una arquitectura sencilla, pero efectiva haciendo deli
 
 He estado trabajando en robusteser el dashboard, aun restan ideas por integrar. El punto más importante, estoy valorando mejorar el modelo fundacional utilizando mas a fondo los hash JA4 y además revalorar la ventana de entrenamiento. En este momento no es recomendable utilizarlo para tomar acción, requiere agrupamiento de ventanas de 10 minutos y ajustar algunas variabels durante el Feature Engineering.
 
+El modelo en este momento ha sido entrenado con mas de 400k registros de edunautica.mx. Sin embargo estimo 2 semanas para modelo final que puede ayudar a actuar como modelo base fundacional.
+
 ## Arquitectura del sistema
 
 ```mermaid
