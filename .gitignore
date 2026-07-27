@@ -1,6 +1,8 @@
 .env.local
 datos-edunautica-a137d0c6c8cc.json
 Data
+!demo/public/data/
+!demo/public/data/demo-predictions.json
 horas_documentadas.txt
 production_pipeline/results
 Notebooks/mlruns
