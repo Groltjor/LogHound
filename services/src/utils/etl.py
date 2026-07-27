@@ -4,9 +4,6 @@ import sys
 from supabase import create_client, Client
 import pandas as pd
 
-SERVICES_ROOT = Path.cwd().parent.parent
-SRC = SERVICES_ROOT / 'src'
-
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY')
 
@@ -18,7 +15,7 @@ from utils.gather import (
 
 from utils.feature_eng import (
     preprocess_drain_logs,
-    process_features_log_drains
+    process_features_log_drains_ver2
 )
 
 def extract_n_load(nombre_tabla : str = 'vercel_logs_buffer'):
@@ -30,9 +27,9 @@ def extract_n_load(nombre_tabla : str = 'vercel_logs_buffer'):
 
     log_drains_clean = preprocess_drain_logs(log_drains)
 
-    log_drains_preprocessed = process_features_log_drains(log_drains_clean)
+    log_drains_preprocessed = process_features_log_drains_ver2(log_drains_clean)
 
-    id_cols = ['ja4Digest','proxy.userAgent', 'proxy.clientIp']
+    id_cols = ['ja4Digest', 'time_window', 'proxy.userAgent', 'proxy.clientIp']
 
     ids = log_drains_preprocessed[id_cols].copy()
 

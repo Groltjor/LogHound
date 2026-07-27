@@ -4,8 +4,6 @@ from pathlib import Path
 import json
 from datetime import datetime, timezone, timedelta
 
-PROJECT_ROOT = Path.cwd().parent
-
 def load_data_from_table_last_10(
     nombre_tabla : str,
     supabase : Client,

@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 import pandas as pd
 import joblib
+import numpy as np
 
 PROJECT_ROOT = Path.cwd()
 SRC_SERVICES = PROJECT_ROOT / 'src'
@@ -18,7 +19,8 @@ from utils.gather import (
 )
 
 from utils.feature_eng import (
-    process_features_log_drains,
+    ##process_features_log_drains, 
+    process_features_log_drains_ver2,
     preprocess_drain_logs
 )
 
@@ -30,6 +32,10 @@ from utils.checkpoints import (
 from utils.pipelines import (
     build_preprocess_base,
     build_kmeans_from_preprocessor
+)
+
+from utils.analyze import (
+    describe_clusters
 )
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
@@ -90,8 +96,13 @@ def ask_for_data(
     
     else:
         
-        parquet_files = list(data_route.glob('raw_train_data_*.parquet'))
-        
+        DATA_FROM_DRAINS = PROJECT_ROOT / 'data_from_drains'
+        print('Extrayendo data de ', DATA_FROM_DRAINS)
+
+        parquet_files = list(DATA_FROM_DRAINS.glob('raw_train_data_*.parquet')) ## Deuda tecnica
+
+        print('Parquet ', parquet_files)
+         
         if len(parquet_files) == 0:
             raise FileNotFoundError(
                 f'No se encontro ningún archivo en  {data_route}'
@@ -128,7 +139,7 @@ else:
 
 log_drains = ask_for_data(nombre_de_tabla_user, decision)
 
-X = process_features_log_drains(log_drains)
+X = process_features_log_drains_ver2(log_drains)
 frame_drain = X.copy() ## cuidado con la memoria
 
 numeric_cols = X.select_dtypes(include = 'number').columns
@@ -147,16 +158,30 @@ drains_preprocessor = build_preprocess_base(metadata)
 
 print(drains_preprocessor)
 
-X  = frame_drain.drop(columns = ['ja4Digest','proxy.userAgent', 'proxy.clientIp']).copy()
+X  = frame_drain.drop(columns = ['ja4Digest', 'time_window', 'proxy.userAgent', 'proxy.clientIp']).copy()
 cluster_size = 4
 model = build_kmeans_from_preprocessor(drains_preprocessor, n = cluster_size) ## JAjaj deberia ser K
 labels = model.fit_predict(X)
 
 X_drains_labels = X.copy()
-to_append = ['ja4Digest','proxy.userAgent', 'proxy.clientIp']
+to_append = ['ja4Digest', 'time_window','proxy.userAgent', 'proxy.clientIp']
+
+## woops
+X_transformed = model.named_steps['preprocessor'].transform(X)
+kmeans = model.named_steps['model']
+centroids = kmeans.cluster_centers_
+# Distancia euclidiana de cada punto a su centroide asignado
+distances = np.linalg.norm(
+    X_transformed - centroids[labels],
+    axis=1
+)
 
 X_drains_labels[to_append] = frame_drain[to_append]
 X_drains_labels['labels'] = labels
+X_drains_labels['distancias'] = distances
+
+print('\nDescribe clusters etiquetados:')
+print(describe_clusters(X_drains_labels).to_string())
 
 X_drains_labels.to_csv(os.path.join(RESULTS_FOLDER, 'labeled_frame.csv'), index = False)
 
@@ -166,8 +191,8 @@ artifact = {
     "model": model,
     "metadata": metadata,
     "feature_cols": list(X.columns),
-    "drop_cols": ['ja4Digest', 'proxy.userAgent', 'proxy.clientIp'],
-    "id_cols": ['ja4Digest', 'proxy.userAgent', 'proxy.clientIp'],
+    "drop_cols": ['ja4Digest', 'time_window', 'proxy.userAgent', 'proxy.clientIp'],
+    "id_cols": ['ja4Digest', 'time_window', 'proxy.userAgent', 'proxy.clientIp'],
     "n_clusters": cluster_size,
     "created_at": run_timestamp,
     "model_name": "kmeans_vercel_drains",

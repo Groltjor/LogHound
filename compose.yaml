@@ -1,0 +1,28 @@
+services:
+  api:
+    build:
+      context: ./services
+
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_KEY: ${SUPABASE_KEY}
+
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: ./next_interface/log-hound
+
+    environment:
+      FASTAPI_URL: http://api:8000
+      WAF_DEFENDER: ${WAF_DEFENDER}
+      PROJECT_ID: ${PROJECT_ID}
+      TEAM_ID: ${TEAM_ID}
+      TEAM_URL: ${TEAM_URL}
+
+    ports:
+      - "3000:3000"
+
+    depends_on:
+      - api

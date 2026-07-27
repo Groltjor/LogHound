@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
+  Crosshair,
   Eye,
   Globe2,
   LockKeyhole,
   LoaderCircle,
   Network,
   ShieldAlert,
-  Timer,
   X,
 } from "lucide-react";
 import { deployAgentFirewallRule, removeAgentFirewallRule } from "./actions/firewallRuleActions";
-import { formatMs, formatNumber } from "../utils/formatters";
+import { formatDistance, formatMs, formatNumber, formatTimeWindow } from "../utils/formatters";
 
 const COUNTERMEASURES = [
   {
@@ -158,6 +158,7 @@ function TargetAnalysisFold({ selectedRecord, mitigationComplete, onClearTarget 
             metrics={[
               { label: "Agente", value: selectedRecord.agentName },
               { label: "Identidad", value: selectedRecord.clientIp },
+              { label: "Ventana 10m", value: formatTimeWindow(selectedRecord.timeWindow) },
             ]}
             footer={{ label: "JA4", value: selectedRecord.ja4Digest }}
           />
@@ -168,21 +169,23 @@ function TargetAnalysisFold({ selectedRecord, mitigationComplete, onClearTarget 
             className="absolute right-0 top-[38%] w-80"
             metrics={[
               { label: "Requests", value: formatNumber(selectedRecord.requests) },
-              { label: "Ventana", value: formatMs(selectedRecord.activityWindowMs) },
               { label: "Rutas", value: formatNumber(selectedRecord.routes) },
+              { label: "Apertura", value: formatDistance(selectedRecord.centroidDistance) },
             ]}
+            footer={{ label: "Rango actividad", value: formatMs(selectedRecord.activityWindowMs) }}
           />
 
           <IntelCard
-            icon={Timer}
-            label="Cadencia"
+            icon={Crosshair}
+            label="Centroide"
             tone="slate"
             className="absolute bottom-0 left-10 w-80"
             metrics={[
+              { label: "Distancia", value: formatDistance(selectedRecord.centroidDistance) },
               { label: "Media", value: formatMs(selectedRecord.meanBetweenMs) },
               { label: "Mediana", value: formatMs(selectedRecord.medianBetweenMs) },
-              { label: "Tipo", value: selectedRecord.oneShot ? "One-shot" : "Recurrente" },
             ]}
+            footer={{ label: "Tipo", value: selectedRecord.oneShot ? "One-shot" : "Recurrente" }}
           />
         </div>
       </div>
@@ -192,9 +195,9 @@ function TargetAnalysisFold({ selectedRecord, mitigationComplete, onClearTarget 
 
 function EmptySelection({ loading, error, activeAgent, activeLabel }) {
   const emptyText = activeAgent
-    ? "Selecciona una IP orbitando el user agent para fijar un target."
+    ? "Selecciona una IP desplegada por distancia al centroide para fijar un target."
     : activeLabel
-      ? `Label ${activeLabel.label}: ${activeLabel.profile?.pattern}. Selecciona una esfera de user agent para desplegar sus IPs.`
+      ? `Label ${activeLabel.label}: ${activeLabel.profile?.pattern}. Selecciona un JA4 digest para ver sus IPs por apertura euclidiana.`
       : "Selecciona un patron para entrar al cluster. Usa arrastre para girar y scroll para acercarte.";
 
   return (

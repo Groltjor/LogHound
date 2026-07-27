@@ -8,47 +8,47 @@ import {
   Bot,
   CircleDot,
   Crosshair,
+  Fingerprint,
   Globe2,
-  Route,
   Search,
-  Timer,
 } from "lucide-react";
 import * as THREE from "three";
 import { listLogHoundAgentRules } from "./contramedidas/actions/firewallRuleActions";
 import SelectionPanel from "./contramedidas/SelectionPanel";
 import SpaceMenu from "./dashboards/menu/SpaceMenu";
 import SecurityResourcesMenu from "./security/SecurityResourcesMenu";
-import { formatMs, formatNumber } from "./utils/formatters";
+import { formatDistance, formatNumber, formatTimeWindow } from "./utils/formatters";
 
-const ENDPOINT = process.env.NEXT_PUBLIC_ML_TRAFFIC_ENDPOINT || "/data/predictions.json";
+const ENDPOINT = "/data/predictions.json";
 const ACTION_TAKEN_COLOR = "#34d399";
 const LABEL_COLORS = ["#38bdf8", "#fb7185", "#fbbf24", "#a78bfa", "#22d3ee", "#f472b6"];
 const LABEL_PROFILES = {
   0: {
-    name: "Visitas casi aisladas",
-    pattern: "Baja repeticion",
-    reading: "Trafico de baja repeticion; mezcla de requests unicos y grupos minimos.",
+    name: "Exploracion moderada L0",
+    pattern: "Cobertura media sostenida",
+    reading: "Sesiones recurrentes con varias rutas visitadas durante una ventana amplia, sin llegar a volumen agresivo.",
   },
   1: {
-    name: "Alto volumen sostenido",
-    pattern: "Crawler agresivo",
-    reading: "Candidato fuerte a crawler agresivo o agente automatizado con muchas rutas visitadas.",
+    name: "One-shot aislado L1",
+    pattern: "Request unico",
+    reading: "Eventos aislados con una sola ruta y ventana casi nula; comportamiento puntual sin recurrencia observable.",
   },
   2: {
-    name: "Burst rapido",
-    pattern: "Varias requests juntas",
-    reading: "Varias requests con separacion muy corta; util para detectar actividad concentrada.",
+    name: "Bajo volumen espaciado L2",
+    pattern: "Pocas rutas con pausa larga",
+    reading: "Actividad recurrente pequena, con pocas rutas y separaciones largas entre requests.",
   },
   3: {
-    name: "Bajo volumen con pausa larga",
-    pattern: "Pocas requests espaciadas",
-    reading: "Pocas requests repartidas en una ventana amplia; comportamiento menos agresivo.",
+    name: "Alto volumen expansivo L3",
+    pattern: "Crawler de alta cobertura",
+    reading: "Grupo de mayor cobertura: muchas rutas unicas, ventana amplia y cadencia sostenida; candidato principal a crawler agresivo.",
   },
 };
 const METRICS = [
   { id: "requests", label: "Requests" },
   { id: "routes", label: "Rutas" },
   { id: "window", label: "Ventana" },
+  { id: "distance", label: "Distancia" },
 ];
 const LAYER_TRANSITION_COMMIT_MS = 430;
 const LAYER_TRANSITION_TOTAL_MS = 780;
@@ -138,24 +138,150 @@ function compactUserAgent(userAgent) {
   return userAgent.length > 42 ? `${userAgent.slice(0, 39)}...` : userAgent;
 }
 
+function compactJa4Digest(ja4Digest) {
+  if (!ja4Digest || ja4Digest === "unknown") return "JA4 unknown";
+  if (ja4Digest.length <= 24) return ja4Digest;
+  return `${ja4Digest.slice(0, 12)}...${ja4Digest.slice(-8)}`;
+}
+
+function safeNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function getDistanceStats(records) {
+  const distances = records.map((item) => safeNumber(item.centroidDistance, Number.NaN)).filter(Number.isFinite);
+  if (!distances.length) {
+    return {
+      avgCentroidDistance: 0,
+      minCentroidDistance: 0,
+      maxCentroidDistance: 0,
+    };
+  }
+
+  return {
+    avgCentroidDistance: distances.reduce((sum, value) => sum + value, 0) / distances.length,
+    minCentroidDistance: Math.min(...distances),
+    maxCentroidDistance: Math.max(...distances),
+  };
+}
+
+function uniqueCount(records, key) {
+  return new Set(records.map((item) => item[key]).filter(Boolean)).size;
+}
+
+function getRepresentativeUserAgent(records) {
+  const counts = new Map();
+  for (const record of records) {
+    counts.set(record.userAgent, (counts.get(record.userAgent) || 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "Unknown agent";
+}
+
+function buildIpNodes(records, label) {
+  const ipMap = new Map();
+
+  for (const record of records) {
+    if (!ipMap.has(record.clientIp)) {
+      ipMap.set(record.clientIp, []);
+    }
+    ipMap.get(record.clientIp).push(record);
+  }
+
+  return Array.from(ipMap.entries()).map(([clientIp, ipRecords]) => {
+    const representative = ipRecords[0];
+    const userAgent = getRepresentativeUserAgent(ipRecords);
+    const distanceStats = getDistanceStats(ipRecords);
+
+    return {
+      ...representative,
+      id: `ip-${label}-${representative.ja4Digest}-${clientIp}`,
+      type: "ip",
+      name: compactUserAgent(userAgent),
+      label,
+      clientIp,
+      userAgent,
+      agentName: compactUserAgent(userAgent),
+      requests: ipRecords.reduce((sum, item) => sum + item.requests, 0),
+      routes: ipRecords.reduce((sum, item) => sum + item.routes, 0),
+      activityWindowMs: ipRecords.reduce((sum, item) => sum + item.activityWindowMs, 0),
+      meanBetweenMs: ipRecords.reduce((sum, item) => sum + item.meanBetweenMs, 0) / Math.max(1, ipRecords.length),
+      medianBetweenMs: ipRecords.reduce((sum, item) => sum + item.medianBetweenMs, 0) / Math.max(1, ipRecords.length),
+      centroidDistance: distanceStats.avgCentroidDistance,
+      oneShot: ipRecords.every((item) => item.oneShot),
+      timeWindowCount: uniqueCount(ipRecords, "timeWindow"),
+      userAgentCount: uniqueCount(ipRecords, "userAgent"),
+      appliedRules: dedupeRules(ipRecords.flatMap((item) => item.appliedRules || [])),
+      records: ipRecords,
+    };
+  });
+}
+
+function buildUserAgentNodes(records, label, ja4Digest) {
+  const userAgentMap = new Map();
+
+  for (const record of records) {
+    if (!userAgentMap.has(record.userAgent)) {
+      userAgentMap.set(record.userAgent, []);
+    }
+    userAgentMap.get(record.userAgent).push(record);
+  }
+
+  return Array.from(userAgentMap.entries()).map(([userAgent, userAgentRecords]) => {
+    const distanceStats = getDistanceStats(userAgentRecords);
+    const ips = uniqueCount(userAgentRecords, "clientIp");
+
+    return {
+      id: `user-agent-${label}-${hashString(`${ja4Digest}-${userAgent}`)}`,
+      type: "userAgent",
+      label,
+      name: compactUserAgent(userAgent),
+      userAgent,
+      agentName: compactUserAgent(userAgent),
+      ja4Digest,
+      records: userAgentRecords,
+      requests: userAgentRecords.reduce((sum, item) => sum + item.requests, 0),
+      routes: userAgentRecords.reduce((sum, item) => sum + item.routes, 0),
+      activityWindowMs: userAgentRecords.reduce((sum, item) => sum + item.activityWindowMs, 0),
+      ips,
+      oneShotCount: buildIpNodes(userAgentRecords, label).filter((item) => item.oneShot).length,
+      timeWindowCount: uniqueCount(userAgentRecords, "timeWindow"),
+      centroidDistance: distanceStats.avgCentroidDistance,
+      avgCentroidDistance: distanceStats.avgCentroidDistance,
+      minCentroidDistance: distanceStats.minCentroidDistance,
+      maxCentroidDistance: distanceStats.maxCentroidDistance,
+      appliedRules: dedupeRules(userAgentRecords.flatMap((item) => item.appliedRules || [])),
+    };
+  });
+}
+
 function normalizeRecords(records) {
   return records.map((record, index) => {
     const userAgent = record["proxy.userAgent"] || "Unknown agent";
     const clientIp = record["proxy.clientIp"] || "0.0.0.0";
+    const timeWindow = record.time_window ?? record.timeWindow ?? record.window ?? "";
+    const ja4Digest = record.ja4Digest || "unknown";
+    const routes = safeNumber(record.routes_visited ?? record.unique_routes ?? 0);
+    const requests = safeNumber(record.conteo_requests ?? record.request_amount ?? record.times_timestamp ?? routes);
 
     return {
-      id: `${record.label}-${clientIp}-${index}`,
+      id: `${record.label}-${clientIp}-${ja4Digest}-${timeWindow}-${index}`,
       label: String(record.label ?? "unknown"),
-      ja4Digest: record.ja4Digest || "unknown",
+      ja4Digest,
+      timeWindow,
       userAgent,
       agentName: compactUserAgent(userAgent),
       clientIp,
-      requests: Number(record.conteo_requests ?? record.request_amount ?? 0),
-      timestamps: Number(record.times_timestamp ?? 0),
-      routes: Number(record.routes_visited ?? 0),
-      activityWindowMs: Number(record.activity_window_ms ?? 0),
-      meanBetweenMs: Number(record.mean_time_between_requests_ms ?? 0),
-      medianBetweenMs: Number(record.median_time_between_requests_ms ?? 0),
+      requests,
+      timestamps: safeNumber(record.times_timestamp ?? requests),
+      routes,
+      uniqueRoutes: safeNumber(record.unique_routes ?? routes),
+      activityWindowMs: safeNumber(record.activity_window_ms ?? 0),
+      meanBetweenMs: safeNumber(record.mean_time_between_requests_ms ?? 0),
+      medianBetweenMs: safeNumber(record.median_time_between_requests_ms ?? 0),
+      centroidDistance: safeNumber(
+        record.distancias ?? record.centroidDistance ?? record.centroid_distance ?? record.distance_to_centroid ?? 0,
+      ),
       oneShot: Boolean(record.is_one_shot),
     };
   });
@@ -180,13 +306,14 @@ function buildClusters(records) {
     const labelGroup = labelMap.get(record.label);
     labelGroup.records.push(record);
 
-    const agentKey = `${record.agentName}|${record.userAgent}`;
+    const agentKey = record.ja4Digest;
     if (!labelGroup.agentMap.has(agentKey)) {
       labelGroup.agentMap.set(agentKey, {
-        id: `agent-${record.label}-${hashString(agentKey)}`,
+        id: `ja4-${record.label}-${hashString(agentKey)}`,
         type: "agent",
         label: record.label,
-        name: record.agentName,
+        name: compactJa4Digest(record.ja4Digest),
+        ja4Digest: record.ja4Digest,
         userAgent: record.userAgent,
         records: [],
       });
@@ -197,15 +324,26 @@ function buildClusters(records) {
 
   return Array.from(labelMap.values())
     .map((labelGroup) => {
-      const agents = Array.from(labelGroup.agentMap.values()).map((agentGroup) => ({
-        ...agentGroup,
-        requests: agentGroup.records.reduce((sum, item) => sum + item.requests, 0),
-        routes: agentGroup.records.reduce((sum, item) => sum + item.routes, 0),
-        activityWindowMs: agentGroup.records.reduce((sum, item) => sum + item.activityWindowMs, 0),
-        ips: agentGroup.records.length,
-        oneShotCount: agentGroup.records.filter((item) => item.oneShot).length,
-        appliedRules: dedupeRules(agentGroup.records.flatMap((item) => item.appliedRules || [])),
-      }));
+      const agents = Array.from(labelGroup.agentMap.values()).map((agentGroup) => {
+        const ipNodes = buildIpNodes(agentGroup.records, agentGroup.label);
+        const userAgents = buildUserAgentNodes(agentGroup.records, agentGroup.label, agentGroup.ja4Digest);
+        const userAgent = getRepresentativeUserAgent(agentGroup.records);
+
+        return {
+          ...agentGroup,
+          userAgent,
+          agentName: compactUserAgent(userAgent),
+          userAgentCount: uniqueCount(agentGroup.records, "userAgent"),
+          userAgents,
+          requests: agentGroup.records.reduce((sum, item) => sum + item.requests, 0),
+          routes: agentGroup.records.reduce((sum, item) => sum + item.routes, 0),
+          activityWindowMs: agentGroup.records.reduce((sum, item) => sum + item.activityWindowMs, 0),
+          ips: ipNodes.length,
+          oneShotCount: ipNodes.filter((item) => item.oneShot).length,
+          appliedRules: dedupeRules(agentGroup.records.flatMap((item) => item.appliedRules || [])),
+          ...getDistanceStats(agentGroup.records),
+        };
+      });
 
       const requests = labelGroup.records.reduce((sum, item) => sum + item.requests, 0);
       const oneShotCount = labelGroup.records.filter((item) => item.oneShot).length;
@@ -220,14 +358,30 @@ function buildClusters(records) {
         oneShotCount,
         recurrentCount: labelGroup.records.length - oneShotCount,
         appliedRules: dedupeRules(labelGroup.records.flatMap((item) => item.appliedRules || [])),
+        ...getDistanceStats(labelGroup.records),
       };
     })
     .sort((a, b) => Number(a.label) - Number(b.label));
 }
 
 function metricValue(item, metric) {
+  if (item.type === "agent") {
+    const userAgentWeight = (item.userAgentCount || 1) * 60;
+    const requestBoost = Math.log2((item.requests || 0) + 1) * 10;
+    if (metric === "distance") return Math.max(0.001, item.avgCentroidDistance ?? 0);
+    return userAgentWeight + requestBoost;
+  }
+
+  if (item.type === "userAgent") {
+    const ipWeight = (item.ips || 1) * 48;
+    const requestBoost = Math.log2((item.requests || 0) + 1) * 9;
+    if (metric === "distance") return Math.max(0.001, item.avgCentroidDistance ?? item.centroidDistance ?? 0);
+    return ipWeight + requestBoost;
+  }
+
   if (metric === "routes") return item.routes || 1;
   if (metric === "window") return Math.max(1, (item.activityWindowMs || 0) / 1000);
+  if (metric === "distance") return Math.max(0.001, item.avgCentroidDistance ?? item.centroidDistance ?? 0);
   return item.requests || 1;
 }
 
@@ -238,9 +392,36 @@ function sphereRadius(item, metric, mode, maxValue = 1) {
     return 0.72 + Math.pow(ratio, 1.55) * 1.72;
   }
 
-  const base = mode === "agent" ? 0.48 : 0.28;
-  const boost = Math.log2(value + 1) * (mode === "agent" ? 0.18 : 0.12);
+  const base = mode === "agent" ? 0.48 : mode === "userAgent" ? 0.42 : 0.28;
+  const boost = Math.log2(value + 1) * (mode === "agent" ? 0.18 : mode === "userAgent" ? 0.16 : 0.12);
   return Math.max(base, base + boost);
+}
+
+function getImportanceOpacity(item) {
+  if (item.type !== "agent") return 1;
+  const count = Math.max(1, item.userAgentCount || 1);
+  return clamp((count - 1) / 5, 0, 1);
+}
+
+function getAgentSuspicionTone(item) {
+  if (item.type !== "agent") {
+    return {
+      coreOpacity: 1,
+      shellOpacity: 1,
+      glowScale: 1,
+      emissiveBoost: 1,
+      color: null,
+    };
+  }
+
+  const importance = getImportanceOpacity(item);
+  return {
+    coreOpacity: clamp(0.18 + importance * 0.95, 0.18, 1),
+    shellOpacity: clamp(0.1 + importance * 1.35, 0.1, 1.25),
+    glowScale: 0.75 + importance * 1.15,
+    emissiveBoost: 0.35 + importance * 2.2,
+    color: importance > 0.72 ? "#fb923c" : importance > 0.38 ? "#fbbf24" : "#64748b",
+  };
 }
 
 function labelColor(label) {
@@ -248,19 +429,60 @@ function labelColor(label) {
   return LABEL_COLORS[index % LABEL_COLORS.length];
 }
 
-function getUniversePosition(item, index, total) {
-  const angle = (index / Math.max(1, total)) * Math.PI * 2;
-  const radius = 4.4 + (hashString(item.id) % 4) * 0.5;
-  const y = ((hashString(`${item.id}-y`) % 300) - 150) / 100;
-  return [Math.cos(angle) * radius, y, Math.sin(angle) * radius];
+function getRankedUniversePosition(item, index, total) {
+  if (total <= 1) return [0, 0, 0];
+  const center = (total - 1) / 2;
+  const x = (index - center) * 6.2;
+  return [x, 0, 0];
 }
 
-function getOrbitPosition(item, index, total, scale = 4.8) {
+function getOrbitDirection(item, index, total) {
   const golden = Math.PI * (3 - Math.sqrt(5));
-  const y = 1 - (index / Math.max(1, total - 1)) * 2;
+  const y = 1 - ((index + 0.5) / Math.max(1, total)) * 2;
   const radius = Math.sqrt(1 - y * y);
   const theta = golden * index + (hashString(item.id) % 100) / 100;
-  return [Math.cos(theta) * radius * scale, y * scale * 0.62, Math.sin(theta) * radius * scale];
+  return new THREE.Vector3(Math.cos(theta) * radius, y * 0.62, Math.sin(theta) * radius).normalize();
+}
+
+function percentile(values, ratio) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const position = clamp(ratio, 0, 1) * (sorted.length - 1);
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+}
+
+function getDistanceRange(values) {
+  const cleanValues = values.map((value) => safeNumber(value, Number.NaN)).filter(Number.isFinite);
+  if (!cleanValues.length) return { min: 0, max: 0 };
+  const min = percentile(cleanValues, 0.08);
+  const max = percentile(cleanValues, 0.94);
+  return max > min ? { min, max } : { min: Math.min(...cleanValues), max: Math.max(...cleanValues) };
+}
+
+function getDistanceOrbitPosition(
+  item,
+  index,
+  total,
+  distanceRange,
+  minScale = 1.35,
+  maxScale = 6.4,
+  spreadBoost = 1,
+) {
+  const distance = safeNumber(item.centroidDistance ?? item.avgCentroidDistance ?? 0);
+  const range = distanceRange.max - distanceRange.min;
+  const ratio = range > 0 ? clamp((distance - distanceRange.min) / range, 0, 1) : distanceRange.max > 0 ? 0.45 : 0;
+  const coreSpread = (total > 12 ? 0.9 : 0.55) * spreadBoost;
+  const radialJitter = ((hashString(`${item.id}-radial`) % 100) / 100 - 0.5) * coreSpread * (1 - ratio);
+  const scale = minScale + Math.pow(ratio, 1.18) * (maxScale - minScale) + radialJitter;
+  const direction = getOrbitDirection(item, index, total);
+  const tangentSeed = hashString(`${item.id}-swarm`);
+  const tangentAngle = ((tangentSeed % 360) / 180) * Math.PI;
+  const tangentRadius = (total > 10 ? 0.72 : 0.42) * spreadBoost * (1 - ratio);
+  const tangent = new THREE.Vector3(Math.cos(tangentAngle), 0, Math.sin(tangentAngle)).multiplyScalar(tangentRadius);
+  return direction.multiplyScalar(Math.max(0.95, scale)).add(tangent).toArray();
 }
 
 function getLockPoint(selectedRecord) {
@@ -290,7 +512,7 @@ function getLockLookAt(lockPoint, cameraPosition, isCompact, viewportSize, camer
   return lockPoint.clone().add(right.multiplyScalar(halfWidth * 0.5));
 }
 
-function CameraDirector({ viewMode, activeLabel, activeAgent, selectedRecord, selectedRadius }) {
+function CameraDirector({ viewMode, activeLabel, activeAgent, activeUserAgent, selectedRecord, selectedRadius }) {
   const { camera, size } = useThree();
   const framesLeft = useRef(0);
   const viewKey = `${viewMode}-${activeLabel?.id || "none"}-${activeAgent?.id || "none"}-${
@@ -298,22 +520,25 @@ function CameraDirector({ viewMode, activeLabel, activeAgent, selectedRecord, se
   }`;
   const isCompact = size.width < 720;
   const lockPoint = useMemo(() => {
-    if (viewMode !== "agent" || !activeAgent) return null;
+    if (viewMode !== "userAgent" || !activeUserAgent) return null;
     return getLockPoint(selectedRecord);
-  }, [activeAgent, selectedRecord, viewMode]);
+  }, [activeUserAgent, selectedRecord, viewMode]);
   const target = useMemo(() => {
     if (lockPoint) {
       return getLockCameraPosition(lockPoint, isCompact, selectedRadius);
     }
 
+    if (viewMode === "userAgent" && activeUserAgent) {
+      return new THREE.Vector3(0, isCompact ? 2.8 : 1.8, isCompact ? 26 : 22);
+    }
     if (viewMode === "agent" && activeAgent) {
-      return new THREE.Vector3(0, isCompact ? 1.2 : 0.6, isCompact ? 11 : 6.8);
+      return new THREE.Vector3(0, isCompact ? 2.8 : 1.8, isCompact ? 26 : 22);
     }
     if (viewMode === "label" && activeLabel) {
-      return new THREE.Vector3(0, isCompact ? 3.4 : 2.6, isCompact ? 20 : 15);
+      return new THREE.Vector3(0, isCompact ? 5.6 : 4.8, isCompact ? 40 : 34);
     }
-    return new THREE.Vector3(0, isCompact ? 3.4 : 2.6, isCompact ? 18 : 12);
-  }, [activeAgent, activeLabel, isCompact, lockPoint, selectedRadius, viewMode]);
+    return new THREE.Vector3(0, isCompact ? 3.8 : 3, isCompact ? 22 : 16);
+  }, [activeAgent, activeLabel, activeUserAgent, isCompact, lockPoint, selectedRadius, viewMode]);
   const lookAtTarget = useMemo(
     () =>
       lockPoint
@@ -362,7 +587,7 @@ function SceneOrbitControls({ activeAgent, selectedRecord, selectedRadius }) {
       enableDamping
       dampingFactor={0.07}
       minDistance={selectedRecord ? 6 : 4.5}
-      maxDistance={selectedRecord ? 28 : 18}
+      maxDistance={selectedRecord ? 80 : 72}
     />
   );
 }
@@ -387,10 +612,12 @@ function SpaceSphere({
   const appliedRules = item.appliedRules || [];
   const actioned = actionVisual && (mitigated || appliedRules.length > 0);
   const displayColor = actioned ? ACTION_TAKEN_COLOR : locked ? "#fb923c" : color;
-  const materialColor = useMemo(() => new THREE.Color(displayColor), [displayColor]);
   const softColor = useMemo(() => new THREE.Color(displayColor).lerp(new THREE.Color("#ffffff"), 0.22), [displayColor]);
   const highlighted = selected || focused || locked;
   const muted = (focusActive && !focused && !locked) || (lockActive && !locked);
+  const suspicionTone = getAgentSuspicionTone(item);
+  const toneColor = suspicionTone.color || displayColor;
+  const toneMaterialColor = useMemo(() => new THREE.Color(toneColor), [toneColor]);
 
   useFrame(({ clock }) => {
     if (!groupRef.current) return;
@@ -419,12 +646,12 @@ function SpaceSphere({
         document.body.style.cursor = "default";
       }}
     >
-      <mesh scale={0.72}>
+      <mesh scale={0.72 * suspicionTone.glowScale}>
         <sphereGeometry args={[radius, 48, 48]} />
         <meshBasicMaterial
-          color={softColor}
+          color={toneMaterialColor}
           transparent
-          opacity={muted ? 0.035 : highlighted ? 0.26 : 0.12}
+          opacity={(muted ? 0.035 : highlighted ? 0.26 : 0.12) * suspicionTone.shellOpacity}
           depthWrite={false}
           blending={THREE.AdditiveBlending}
         />
@@ -433,12 +660,12 @@ function SpaceSphere({
         <sphereGeometry args={[radius, 64, 64]} />
         <meshPhysicalMaterial
           color={softColor}
-          emissive={materialColor}
-          emissiveIntensity={muted ? 0.04 : highlighted ? 0.48 : 0.18}
+          emissive={toneMaterialColor}
+          emissiveIntensity={(muted ? 0.04 : highlighted ? 0.48 : 0.18) * suspicionTone.emissiveBoost}
           roughness={0.18}
           metalness={0}
           transparent
-          opacity={muted ? 0.08 : highlighted ? 0.4 : 0.22}
+          opacity={(muted ? 0.08 : highlighted ? 0.4 : 0.22) * suspicionTone.coreOpacity}
           clearcoat={1}
           clearcoatRoughness={0.22}
           side={THREE.DoubleSide}
@@ -448,19 +675,19 @@ function SpaceSphere({
       <mesh scale={1.04}>
         <sphereGeometry args={[radius, 32, 32]} />
         <meshBasicMaterial
-          color={displayColor}
+          color={toneColor}
           transparent
-          opacity={muted ? 0.08 : highlighted ? 0.52 : 0.2}
+          opacity={(muted ? 0.08 : highlighted ? 0.52 : 0.2) * suspicionTone.coreOpacity}
           wireframe
           depthWrite={false}
         />
       </mesh>
-      <mesh scale={1.42}>
+      <mesh scale={1.42 * suspicionTone.glowScale}>
         <sphereGeometry args={[radius, 32, 32]} />
         <meshBasicMaterial
-          color={displayColor}
+          color={toneColor}
           transparent
-          opacity={muted ? 0.025 : highlighted ? 0.16 : 0.07}
+          opacity={(muted ? 0.025 : highlighted ? 0.16 : 0.07) * suspicionTone.shellOpacity}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
           side={THREE.BackSide}
@@ -539,11 +766,15 @@ function HoverTooltip({ item }) {
 
   const position = item.__position || [0, 0, 0];
   const requests = item.requests ?? 0;
+  const distance = item.centroidDistance ?? item.avgCentroidDistance;
+  const title = item.type === "ip" ? item.agentName || compactUserAgent(item.userAgent) : item.name;
   const secondary =
     item.type === "ip"
-      ? item.clientIp
+      ? `${item.clientIp}${item.userAgentCount > 1 ? ` - ${formatNumber(item.userAgentCount)} user agents` : ""}`
       : item.type === "agent"
-        ? `${item.ips} IPs`
+        ? `${item.ips} IPs - ${item.userAgentCount} user agents`
+        : item.type === "userAgent"
+          ? `${formatNumber(item.ips)} IPs - JA4 ${compactJa4Digest(item.ja4Digest)}`
         : `Label ${item.label} - ${item.profile?.pattern || "Patron"}`;
 
   return (
@@ -554,14 +785,78 @@ function HoverTooltip({ item }) {
       style={{ pointerEvents: "none" }}
     >
       <div className="pointer-events-none min-w-44 rounded-md border border-white/15 bg-zinc-950/90 px-3 py-2 text-xs text-white shadow-2xl backdrop-blur-md">
-        <div className="font-semibold">{item.name}</div>
+        <div className="font-semibold">{title}</div>
         <div className="mt-1 text-white/60">{secondary}</div>
         {item.type === "label" && item.profile?.reading ? (
           <div className="mt-1 max-w-56 text-white/50">{item.profile.reading}</div>
         ) : null}
         <div className="mt-1 text-cyan-200">{formatNumber(requests)} requests</div>
+        {distance !== undefined ? (
+          <div className="mt-1 text-orange-200">Distancia centroide: {formatDistance(distance)}</div>
+        ) : null}
+        {item.type === "ip" && item.timeWindowCount > 1 ? (
+          <div className="mt-1 text-white/45">Ventanas: {formatNumber(item.timeWindowCount)}</div>
+        ) : item.type === "ip" && item.timeWindow ? (
+          <div className="mt-1 text-white/45">Ventana: {formatTimeWindow(item.timeWindow)}</div>
+        ) : null}
       </div>
     </Html>
+  );
+}
+
+function UserAgentCore({ userAgentGroup, color }) {
+  const coreRef = useRef(null);
+  const haloRef = useRef(null);
+  const trailRef = useRef(null);
+  const softColor = useMemo(() => new THREE.Color(color).lerp(new THREE.Color("#ffffff"), 0.18), [color]);
+
+  useFrame(({ clock }) => {
+    const pulse = (Math.sin(clock.elapsedTime * 4.4) + 1) / 2;
+    if (coreRef.current) {
+      coreRef.current.scale.setScalar(1 + pulse * 0.18);
+      coreRef.current.material.opacity = 0.55 + pulse * 0.34;
+      coreRef.current.material.emissiveIntensity = 0.75 + pulse * 1.35;
+    }
+    if (haloRef.current) {
+      haloRef.current.scale.setScalar(1.9 + pulse * 0.72);
+      haloRef.current.material.opacity = 0.08 + pulse * 0.12;
+    }
+    if (trailRef.current) {
+      trailRef.current.rotation.y += 0.006;
+      trailRef.current.rotation.z += 0.002;
+      trailRef.current.material.opacity = 0.18 + pulse * 0.16;
+    }
+  });
+
+  return (
+    <group position={[0, 0, 0]}>
+      <mesh ref={haloRef}>
+        <sphereGeometry args={[0.82, 48, 48]} />
+        <meshBasicMaterial color={softColor} transparent opacity={0.12} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+      <mesh ref={trailRef}>
+        <torusGeometry args={[1.15, 0.018, 16, 96]} />
+        <meshBasicMaterial color={color} transparent opacity={0.24} blending={THREE.AdditiveBlending} depthWrite={false} />
+      </mesh>
+      <mesh ref={coreRef}>
+        <sphereGeometry args={[0.36, 48, 48]} />
+        <meshPhysicalMaterial
+          color={softColor}
+          emissive={color}
+          emissiveIntensity={1.2}
+          roughness={0.18}
+          transparent
+          opacity={0.8}
+          clearcoat={1}
+          depthWrite={false}
+        />
+      </mesh>
+      <Html position={[0, 1.55, 0]} center zIndexRange={[50, 20]} style={{ pointerEvents: "none" }}>
+        <div className="pointer-events-none max-w-60 truncate rounded-md border border-orange-200/32 bg-black/45 px-3 py-1.5 text-center text-[10px] font-bold uppercase tracking-[0.14em] text-orange-100 shadow-[0_0_24px_rgba(251,146,60,.24)] backdrop-blur-md">
+          {userAgentGroup.name}
+        </div>
+      </Html>
+    </group>
   );
 }
 
@@ -569,6 +864,7 @@ function SpaceScene({
   clusters,
   activeLabel,
   activeAgent,
+  activeUserAgent,
   metric,
   hovered,
   selectedRecord,
@@ -577,36 +873,67 @@ function SpaceScene({
   setHovered,
   onSelect,
 }) {
-  const viewMode = activeAgent ? "agent" : activeLabel ? "label" : "universe";
+  const viewMode = activeUserAgent ? "userAgent" : activeAgent ? "agent" : activeLabel ? "label" : "universe";
   const focusActive =
     (hovered?.type === "label" && viewMode === "universe") ||
     (hovered?.type === "agent" && viewMode === "label");
-  const lockActive = Boolean(activeAgent && selectedRecord);
+  const lockActive = Boolean(activeUserAgent && selectedRecord);
   const items = useMemo(() => {
-    if (activeAgent) {
-      return activeAgent.records.map((record, index) => ({
+    if (activeUserAgent) {
+      const ipNodes = buildIpNodes(activeUserAgent.records, activeUserAgent.label);
+      const recordDistanceRange = getDistanceRange(ipNodes.map((record) => record.centroidDistance || 0));
+      return ipNodes.map((record, index) => ({
         ...record,
-        id: `ip-${record.id}`,
-        type: "ip",
-        name: record.clientIp,
-        label: activeAgent.label,
-        __position: getOrbitPosition(record, index, activeAgent.records.length, 3.6),
+        __position: getDistanceOrbitPosition(
+          record,
+          index,
+          ipNodes.length,
+          recordDistanceRange,
+          1.7,
+          12.8,
+        ),
+      }));
+    }
+
+    if (activeAgent) {
+      const userAgentDistanceRange = getDistanceRange(activeAgent.userAgents.map((agent) => agent.avgCentroidDistance || 0));
+      return activeAgent.userAgents.map((userAgentGroup, index) => ({
+        ...userAgentGroup,
+        __position: getDistanceOrbitPosition(
+          userAgentGroup,
+          index,
+          activeAgent.userAgents.length,
+          userAgentDistanceRange,
+          2.4,
+          13.4,
+          1.65,
+        ),
       }));
     }
 
     if (activeLabel) {
+      const agentDistanceRange = getDistanceRange(activeLabel.agents.map((agent) => agent.avgCentroidDistance || 0));
       return activeLabel.agents.map((agent, index) => ({
         ...agent,
         profile: activeLabel.profile,
-        __position: getOrbitPosition(agent, index, activeLabel.agents.length, 5.2),
+        __position: getDistanceOrbitPosition(
+          agent,
+          index,
+          activeLabel.agents.length,
+          agentDistanceRange,
+          4.2,
+          17.5,
+          2.4,
+        ),
       }));
     }
 
-    return clusters.map((cluster, index) => ({
+    const rankedClusters = [...clusters].sort((a, b) => metricValue(a, metric) - metricValue(b, metric));
+    return rankedClusters.map((cluster, index) => ({
       ...cluster,
-      __position: getUniversePosition(cluster, index, clusters.length),
+      __position: getRankedUniversePosition(cluster, index, rankedClusters.length),
     }));
-  }, [activeAgent, activeLabel, clusters]);
+  }, [activeAgent, activeLabel, activeUserAgent, clusters, metric]);
 
   const centerColor = activeLabel ? labelColor(activeLabel.label) : "#38bdf8";
   const maxVisibleMetric = useMemo(
@@ -620,7 +947,7 @@ function SpaceScene({
   return (
     <>
       <color attach="background" args={["#030712"]} />
-      <fog attach="fog" args={["#030712", 12, 28]} />
+      <fog attach="fog" args={["#030712", 28, 78]} />
       <ambientLight intensity={0.42} />
       <pointLight position={[3, 6, 5]} intensity={2.2} color="#e0f2fe" />
       <pointLight position={[-6, -2, -4]} intensity={1.6} color="#fda4af" />
@@ -629,18 +956,21 @@ function SpaceScene({
         viewMode={viewMode}
         activeLabel={activeLabel}
         activeAgent={activeAgent}
+        activeUserAgent={activeUserAgent}
         selectedRecord={selectedRecord}
         selectedRadius={selectedRadius}
       />
 
-      {activeLabel ? (
+      {activeUserAgent ? (
+        <UserAgentCore userAgentGroup={activeUserAgent} color={labelColor(activeUserAgent.label)} />
+      ) : activeLabel ? (
         <mesh position={[0, 0, 0]}>
           <sphereGeometry args={[0.18, 32, 32]} />
           <meshStandardMaterial color={centerColor} emissive={centerColor} emissiveIntensity={0.8} />
         </mesh>
       ) : null}
 
-      {activeAgent
+      {activeUserAgent
         ? items.map((item) => (
             <Line
               key={`line-${item.id}`}
@@ -677,7 +1007,7 @@ function SpaceScene({
         <TacticalHoverPanel item={hovered} radius={sphereRadius(hovered, metric, hovered.type, maxVisibleMetric)} />
       ) : null}
 
-      {activeAgent && selectedRecord ? (
+      {activeUserAgent && selectedRecord ? (
         <TargetLockConnector
           item={selectedRecord}
           radius={selectedRadius}
@@ -685,8 +1015,8 @@ function SpaceScene({
         />
       ) : null}
 
-      {hovered && hovered.type === "ip" ? <HoverTooltip item={hovered} /> : null}
-      <SceneOrbitControls activeAgent={activeAgent} selectedRecord={selectedRecord} selectedRadius={selectedRadius} />
+      {hovered && (hovered.type === "ip" || hovered.type === "userAgent") ? <HoverTooltip item={hovered} /> : null}
+      <SceneOrbitControls activeAgent={activeUserAgent} selectedRecord={selectedRecord} selectedRadius={selectedRadius} />
     </>
   );
 }
@@ -708,6 +1038,29 @@ function LayerWarpOverlay({ transition }) {
           {transition.phase === "enter" ? "Capa desplegada" : "Abriendo capa"}
         </div>
         <div className="mt-2 truncate text-sm font-semibold text-white/80">{transition.name}</div>
+      </div>
+    </div>
+  );
+}
+
+function InitialLabelLegend({ clusters }) {
+  if (!clusters.length) return null;
+
+  return (
+    <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 hidden w-[min(92vw,860px)] -translate-x-1/2 md:block">
+      <div className="pointer-events-auto rounded-md border border-white/10 bg-black/38 px-3 py-2 text-white shadow-2xl shadow-black/25 backdrop-blur-md">
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+          {clusters.map((cluster) => (
+            <div key={cluster.id} className="flex min-w-0 items-center gap-2 text-xs">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/35 shadow-[0_0_12px_currentColor]"
+                style={{ backgroundColor: labelColor(cluster.label), color: labelColor(cluster.label) }}
+              />
+              <span className="max-w-44 truncate font-semibold text-white/78">{cluster.name}</span>
+              <span className="font-mono text-white/38">{formatNumber(cluster.records.length)}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -769,14 +1122,14 @@ function TacticalHoverPanel({ item, radius }) {
     ? [
         { label: "IPs detectadas", value: formatNumber(item.ips), icon: Globe2 },
         { label: "Requests", value: formatNumber(item.requests), icon: Activity },
-        { label: "Rutas", value: formatNumber(item.routes), icon: Route },
-        { label: "Ventana", value: formatMs(item.activityWindowMs), icon: Timer },
+        { label: "Distancia", value: formatDistance(item.avgCentroidDistance), icon: Crosshair },
+        { label: "User agents", value: formatNumber(item.userAgentCount), icon: Bot },
       ]
     : [
         { label: "IPs asociadas", value: formatNumber(item.ips), icon: Globe2 },
         { label: "Requests", value: formatNumber(item.requests), icon: Activity },
-        { label: "Ventana", value: formatMs(item.activityWindowMs), icon: Timer },
-        { label: "User agents", value: formatNumber(item.agents.length), icon: Bot },
+        { label: "Distancia", value: formatDistance(item.avgCentroidDistance), icon: Crosshair },
+        { label: "JA4 digests", value: formatNumber(item.agents.length), icon: Fingerprint },
       ];
 
   return (
@@ -806,7 +1159,7 @@ function TacticalHoverPanel({ item, radius }) {
         <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-3">
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">
-              {isAgent ? "Agent lock" : "Pattern lock"}
+              {isAgent ? "JA4 lock" : "Pattern lock"}
             </div>
             <h2 className="mt-1 text-xl font-semibold tracking-normal">{item.name}</h2>
           </div>
@@ -817,17 +1170,18 @@ function TacticalHoverPanel({ item, radius }) {
 
         <div className="mt-3 rounded-md border border-white/10 bg-black/25 p-3">
           <div className="text-[11px] uppercase tracking-normal text-white/45">
-            {isAgent ? "Agente observado" : "Patron observado"}
+            {isAgent ? "JA4 observado" : "Patron observado"}
           </div>
           <div className="mt-1 text-sm font-medium text-white">{isAgent ? profile.pattern : item.profile?.pattern}</div>
           <p className="mt-2 text-sm leading-6 text-white/62">
             {isAgent
-              ? "Agrupacion de IPs que comparten este user agent dentro del patron seleccionado."
+              ? "Agrupacion de IPs que comparten este JA4 digest dentro del patron seleccionado."
               : item.profile?.reading}
           </p>
           {isAgent ? (
             <div className="mt-3 max-h-24 overflow-hidden rounded-md border border-white/10 bg-white/[0.04] p-2 text-xs leading-5 text-white/55">
-              {item.userAgent}
+              <div className="font-mono text-cyan-100/80">{item.ja4Digest}</div>
+              <div className="mt-2 text-white/45">{formatNumber(item.userAgentCount)} user agents asociados</div>
             </div>
           ) : null}
         </div>
@@ -926,6 +1280,7 @@ export default function SpaceClient() {
   const [query, setQuery] = useState("");
   const [activeLabelId, setActiveLabelId] = useState(null);
   const [activeAgentId, setActiveAgentId] = useState(null);
+  const [activeUserAgentId, setActiveUserAgentId] = useState(null);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [mitigatedTargetId, setMitigatedTargetId] = useState(null);
   const [hovered, setHovered] = useState(null);
@@ -1035,6 +1390,7 @@ export default function SpaceClient() {
   const clusters = useMemo(() => buildClusters(filteredRecords), [filteredRecords]);
   const activeLabel = clusters.find((cluster) => cluster.id === activeLabelId) || null;
   const activeAgent = activeLabel?.agents.find((agent) => agent.id === activeAgentId) || null;
+  const activeUserAgent = activeAgent?.userAgents.find((userAgent) => userAgent.id === activeUserAgentId) || null;
   const selectedRecordWithRules = selectedRecord
     ? {
         ...selectedRecord,
@@ -1083,6 +1439,7 @@ export default function SpaceClient() {
     startLayerTransition(item, () => {
       setActiveLabelId(item.id);
       setActiveAgentId(null);
+      setActiveUserAgentId(null);
       setSelectedRecord(null);
       setMitigatedTargetId(null);
       setMeasuresOpen(false);
@@ -1092,6 +1449,16 @@ export default function SpaceClient() {
   function openAgent(item) {
     startLayerTransition(item, () => {
       setActiveAgentId(item.id);
+      setActiveUserAgentId(null);
+      setSelectedRecord(null);
+      setMitigatedTargetId(null);
+      setMeasuresOpen(false);
+    });
+  }
+
+  function openUserAgent(item) {
+    startLayerTransition(item, () => {
+      setActiveUserAgentId(item.id);
       setSelectedRecord(null);
       setMitigatedTargetId(null);
       setMeasuresOpen(false);
@@ -1109,14 +1476,28 @@ export default function SpaceClient() {
       return;
     }
 
+    if (item.type === "userAgent") {
+      openUserAgent(item);
+      return;
+    }
+
     setSelectedRecord(item);
     setMitigatedTargetId(null);
     setMeasuresOpen(false);
   }
 
   function goBack() {
+    if (activeUserAgent) {
+      setActiveUserAgentId(null);
+      setSelectedRecord(null);
+      setMitigatedTargetId(null);
+      setMeasuresOpen(false);
+      return;
+    }
+
     if (activeAgent) {
       setActiveAgentId(null);
+      setActiveUserAgentId(null);
       setSelectedRecord(null);
       setMitigatedTargetId(null);
       setMeasuresOpen(false);
@@ -1126,23 +1507,31 @@ export default function SpaceClient() {
     if (activeLabel) {
       setActiveLabelId(null);
       setSelectedRecord(null);
+      setActiveUserAgentId(null);
       setMitigatedTargetId(null);
       setMeasuresOpen(false);
     }
   }
 
-  const modeTitle = activeAgent
-    ? `${activeAgent.name}: IPs desplegadas`
+  const modeTitle = activeUserAgent
+    ? `${activeUserAgent.name}: IPs asociadas`
+    : activeAgent
+      ? `${activeAgent.name}: user agents`
     : activeLabel
-      ? `${activeLabel.name}: user agents`
+      ? `${activeLabel.name}: JA4 digests`
       : "Espacio de labels";
   const modeDescription = activeLabel
-    ? activeLabel.profile?.reading
-    : "Gira el espacio, entra a un patron y abre un user agent para dividirlo por IP. El tamano cambia con la metrica activa.";
+    ? activeUserAgent
+      ? "Nucleo activo del user agent seleccionado. Abre una IP para fijar el target y tomar medidas."
+      : activeAgent
+        ? "User agents agrupados dentro del JA4 seleccionado, sin importar la IP."
+        : activeLabel.profile?.reading
+    : "Gira el espacio, entra a un patron y abre un JA4 digest para dividirlo por IP. El tamano cambia con la metrica activa.";
   const breadcrumbs = [
     { label: "Sector", value: "Espacio de labels" },
     ...(activeLabel ? [{ label: `Label ${activeLabel.label}`, value: activeLabel.name }] : []),
-    ...(activeAgent ? [{ label: "Agent", value: activeAgent.name }] : []),
+    ...(activeAgent ? [{ label: "JA4", value: activeAgent.name }] : []),
+    ...(activeUserAgent ? [{ label: "User agent", value: activeUserAgent.name }] : []),
 	    ...(selectedRecordWithRules ? [{ label: "IP", value: selectedRecordWithRules.clientIp }] : []),
   ];
   const tacticalHover =
@@ -1154,7 +1543,7 @@ export default function SpaceClient() {
     <main className="relative min-h-screen overflow-hidden bg-zinc-950 text-white">
       <div className="absolute inset-0">
         <Canvas
-          camera={{ position: [0, 2.6, 12], fov: 48 }}
+          camera={{ position: [0, 3, 16], fov: 48 }}
           dpr={[1, 1.8]}
           gl={{ antialias: true, alpha: false, powerPreference: "high-performance" }}
         >
@@ -1162,6 +1551,7 @@ export default function SpaceClient() {
             clusters={clusters}
             activeLabel={activeLabel}
             activeAgent={activeAgent}
+            activeUserAgent={activeUserAgent}
             metric={metric}
             hovered={hovered}
 	          selectedRecord={selectedRecordWithRules}
@@ -1180,6 +1570,7 @@ export default function SpaceClient() {
       />
       <LayerWarpOverlay transition={layerTransition} />
       <SecurityResourcesMenu />
+      {!activeLabel && !selectedRecordWithRules ? <InitialLabelLegend clusters={clusters} /> : null}
 
 	      {!selectedRecordWithRules ? (
         <>
@@ -1214,18 +1605,23 @@ export default function SpaceClient() {
                     setQuery(event.target.value);
                     setActiveLabelId(null);
                     setActiveAgentId(null);
+                    setActiveUserAgentId(null);
                     setSelectedRecord(null);
                     setMitigatedTargetId(null);
                     setMeasuresOpen(false);
                   }}
-                  placeholder="Buscar bot, user agent, IP o JA4"
+                  placeholder="Buscar JA4, user agent o IP"
                   className="h-10 w-full rounded-md border border-white/10 bg-white/10 pl-9 pr-3 text-sm text-white outline-none transition placeholder:text-white/40 focus:border-cyan-300"
                 />
               </label>
-              <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-white/55">
+              <div className="mt-3 grid grid-cols-4 gap-2 text-xs text-white/55">
                 <div className="flex items-center gap-1.5">
                   <CircleDot size={13} />
                   Patron
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Fingerprint size={13} />
+                  JA4
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Bot size={13} />
@@ -1242,7 +1638,7 @@ export default function SpaceClient() {
               loading={loading}
               error={error}
 	              selectedRecord={selectedRecordWithRules}
-              activeAgent={activeAgent}
+              activeAgent={activeUserAgent}
               activeLabel={activeLabel}
               measuresOpen={measuresOpen}
               onToggleMeasures={() => setMeasuresOpen((value) => !value)}
@@ -1271,7 +1667,7 @@ export default function SpaceClient() {
           loading={loading}
           error={error}
 	          selectedRecord={selectedRecordWithRules}
-          activeAgent={activeAgent}
+          activeAgent={activeUserAgent}
           activeLabel={activeLabel}
           measuresOpen={measuresOpen}
           onToggleMeasures={() => setMeasuresOpen((value) => !value)}

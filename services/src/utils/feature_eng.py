@@ -66,3 +66,70 @@ def preprocess_drain_logs(dataframe):
     )
 
     return agents_clean_data
+
+
+def process_features_log_drains_ver2(fuente_datos : pd.DataFrame) -> pd.DataFrame:
+    """
+    Para mejorar este process es vital remover agrupacion por proxy.clientIP
+    Revisar documentacion de Ja4, tambien se removie el user agent dado la preferencia
+    por el footprint.
+    """
+
+    print('Estamos utilizando la Ver 2 de preprocesamiento de FE')
+
+    ## En esta versión aun no hemos hecho FE de ja4
+
+    df = fuente_datos.copy()
+
+    df['timestamp_dt'] = pd.to_datetime(
+        df['proxy.timestamp'],
+        unit = 'ms',
+        utc = 'True',
+        errors = 'Coerce'
+    )
+
+    df = df.dropna(subset = ['timestamp_dt', 'ja4Digest'])
+    df['time_window'] = df['timestamp_dt'].dt.floor('10min')
+
+    new_view = (
+        df
+        .groupby([
+            'ja4Digest',
+            'time_window',
+            'proxy.userAgent',
+            'proxy.clientIp'
+    ],
+    observed = True,)
+        .agg(
+            routes_visited = ( 'proxy.path', 'count'),
+            unique_routes = ( 'proxy.path', 'nunique'),
+
+            activity_window_ms = (
+                'proxy.timestamp',
+                lambda x: x.max() - x.min()
+            ),
+
+            mean_time_between_requests_ms = (
+                'proxy.timestamp',
+                lambda x: x.sort_values().diff().mean()
+            ),
+
+            median_time_between_requests_ms = (
+                'proxy.timestamp',
+                lambda x : x.sort_values().diff().median()
+            )
+            
+        )
+        .reset_index()
+    )
+
+    time_columns = [
+        "activity_window_ms",
+        "mean_time_between_requests_ms",
+        "median_time_between_requests_ms",
+    ]
+
+    new_view[time_columns] = new_view[time_columns].fillna(0)
+    new_view['is_one_shot'] = (new_view['routes_visited'] == 1)
+
+    return new_view

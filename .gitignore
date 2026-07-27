@@ -2,15 +2,12 @@
 datos-edunautica-a137d0c6c8cc.json
 Data
 horas_documentadas.txt
-Notebooks/
 production_pipeline/results
 Notebooks/mlruns
 /models/
 Notebooks/<class 'pathlib.Path'>
-src/utils/statistics.py
 __pycache__
 *.py[cod]
-/src/
 checkpoints
 results
-/fuentes.txt
+EntregableTec

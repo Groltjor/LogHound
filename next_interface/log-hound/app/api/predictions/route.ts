@@ -2,7 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 
 export async function POST() {
-  const fastApiUrl = process.env.FASTAPI_URL;
+  const fastApiUrl = process.env.FASTAPI_URL + "/run_pipeline";
 
   if (!fastApiUrl) {
     return Response.json(
