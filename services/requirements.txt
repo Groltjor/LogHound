@@ -2,7 +2,6 @@ scipy
 numpy
 pandas
 supabase
-typing
 fastapi
-scikit-learn
+scikit-learn==1.8.0
 uvicorn[standard]
